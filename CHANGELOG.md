@@ -3,6 +3,25 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.0.2 — 2026-06-13 — bug fixes
+
+- **Fixed `./pebble install` failing to compile on Swift 6.2.x.** The
+  smooth-lighting arithmetic in `Mesher.swift` (plus a few other expressions)
+  overran the Swift type-checker's budget and tripped integer-vs-`Double`
+  inference, breaking the build partway through `./pebble install`. The
+  expressions are now broken into single-operation typed locals; Pebble builds
+  cleanly on every Swift 6.0–6.3 toolchain. Worldgen/mesh output is unchanged.
+  This completes the #1 fix that 1.0.1 only partially addressed.
+- **Fixed over-dark lighting in pits, holes and undersides.** Smooth lighting
+  averaged in the zero skylight of solid neighbours, so the walls and floor of
+  a freshly-dug hole rendered far darker than they should in daylight. Opaque
+  neighbours now contribute the face light (standard vanilla smooth lighting);
+  ambient occlusion still shades the corners. Re-baselined the mesh goldens.
+- **The installer now checks your Swift version up front.** `./pebble install`
+  needs Swift 6.0+; if you're below that it explains the fix and can install a
+  current toolchain for you (via swiftly) instead of failing partway through a
+  build.
+
 ## 1.0.1 — 2026-06-13 — minor bug fixes
 
 - **Fixed a build failure on newer toolchains.** A literal-arithmetic

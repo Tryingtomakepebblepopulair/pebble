@@ -533,29 +533,29 @@ private func entityTileCrop(_ tile: String) -> EntityTileCrop? {
         let c = String(tile.dropLast("_bed_top".count))
         // head (pillow) half over foot half, like the painter's layout
         return EntityTileCrop(path: "entity/bed/\(c)",
-                              rects: [(6 / 64, 6 / 64, 16 / 64, 16 / 64),
-                                      (6 / 64, 28 / 64, 16 / 64, 16 / 64)], rotate: false)
+                              rects: [(6.0 / 64.0, 6.0 / 64.0, 16.0 / 64.0, 16.0 / 64.0),
+                                      (6.0 / 64.0, 28.0 / 64.0, 16.0 / 64.0, 16.0 / 64.0)], rotate: false)
     }
     if tile.hasSuffix("_bed_side") {
         let c = String(tile.dropLast("_bed_side".count))
         // long side strip of the head piece; column nearest the top face
         // (x=22) becomes the tile's top row after rotation
         return EntityTileCrop(path: "entity/bed/\(c)",
-                              rects: [(22 / 64, 6 / 64, 6 / 64, 16 / 64)], rotate: true)
+                              rects: [(22.0 / 64.0, 6.0 / 64.0, 6.0 / 64.0, 16.0 / 64.0)], rotate: true)
     }
     switch tile {
     case "chest_side":
         // lid front (5 rows) stacked on base front (10 rows)
         return EntityTileCrop(path: "entity/chest/normal",
-                              rects: [(14 / 64, 14 / 64, 14 / 64, 5 / 64),
-                                      (14 / 64, 33 / 64, 14 / 64, 10 / 64)], rotate: false)
+                              rects: [(14.0 / 64.0, 14.0 / 64.0, 14.0 / 64.0, 5.0 / 64.0),
+                                      (14.0 / 64.0, 33.0 / 64.0, 14.0 / 64.0, 10.0 / 64.0)], rotate: false)
     case "ender_chest_side":
         return EntityTileCrop(path: "entity/chest/ender",
-                              rects: [(14 / 64, 14 / 64, 14 / 64, 5 / 64),
-                                      (14 / 64, 33 / 64, 14 / 64, 10 / 64)], rotate: false)
+                              rects: [(14.0 / 64.0, 14.0 / 64.0, 14.0 / 64.0, 5.0 / 64.0),
+                                      (14.0 / 64.0, 33.0 / 64.0, 14.0 / 64.0, 10.0 / 64.0)], rotate: false)
     case "bell_body":
         return EntityTileCrop(path: "entity/bell/bell_body",
-                              rects: [(6 / 32, 6 / 32, 6 / 32, 7 / 32)], rotate: false)
+                              rects: [(6.0 / 32.0, 6.0 / 32.0, 6.0 / 32.0, 7.0 / 32.0)], rotate: false)
     case "decorated_pot_side":
         return EntityTileCrop(path: "entity/decorated_pot/decorated_pot_side",
                               rects: [(0, 0, 1, 1)], rotate: false)

@@ -251,8 +251,21 @@ final class EntityRendererM {
                     let d = dirs[si % dirs.count]
                     let ext = 0.45 + Foundation.sin(time * 2 + Double(si)) * 0.06
                     m = mTranslate(m, Float(d.0 * ext), Float(d.1 * ext), Float(d.2 * ext))
-                    m = mRotateX(m, Float(d.2 != 0 ? (d.2 > 0 ? 1.0 : -1.0) * .pi / 2 * abs(d.2) : 0))
-                    m = mRotateZ(m, Float(d.0 != 0 ? -(d.0 > 0 ? 1.0 : -1.0) * .pi / 2 * abs(d.0) : (d.1 < 0 ? .pi : 0)))
+                    // typed sub-expressions: the nested-ternary Float(...) forms
+                    // overrun the Swift type-checker on some toolchains (6.2.4).
+                    // Same arithmetic.
+                    var ax: Double = 0
+                    if d.2 != 0 {
+                        let sx: Double = d.2 > 0 ? 1.0 : -1.0
+                        ax = sx * Double.pi / 2 * abs(d.2)
+                    }
+                    m = mRotateX(m, Float(ax))
+                    var az: Double = d.1 < 0 ? Double.pi : 0
+                    if d.0 != 0 {
+                        let sz: Double = d.0 > 0 ? 1.0 : -1.0
+                        az = -sz * Double.pi / 2 * abs(d.0)
+                    }
+                    m = mRotateZ(m, Float(az))
                 } else if n == "tail" {
                     m = mRotateY(m, Float(Foundation.sin(time * 4) * 0.3))
                 }

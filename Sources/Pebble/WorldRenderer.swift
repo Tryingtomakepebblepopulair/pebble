@@ -1390,7 +1390,15 @@ final class WorldRenderer {
             def.texFn?(meta, face) ?? (def.tex.isEmpty ? 0 : Int(def.tex[face]))
         }
         func u32(_ layer: Int, _ normal: Int) -> UInt32 {
-            UInt32((layer & 4095) | (normal << 12) | (3 << 15) | ((sky & 15) << 17) | ((blk & 15) << 21) | ((flash ? 1 : 0) << 25))
+            // stepwise on a typed Int: the inline bitwise-OR chain overruns the
+            // Swift type-checker on some toolchains (6.2.4). Same result.
+            var v = layer & 4095
+            v |= normal << 12
+            v |= 3 << 15
+            v |= (sky & 15) << 17
+            v |= (blk & 15) << 21
+            v |= (flash ? 1 : 0) << 25
+            return UInt32(v)
         }
         let Bv: UInt32 = 0xffffff
         let faces: [(Int, [[Float]])] = [

@@ -158,7 +158,11 @@ final class SectionMesher {
         return 0
     }
 
-    /// corner light = avg of the 4 cells adjacent to the corner on the face's outside plane
+    /// corner light = avg of the 4 cells adjacent to the corner on the face's outside plane.
+    /// A face is lit by the air cell it faces (`a`); an OPAQUE side/diagonal neighbor
+    /// carries no light of its own, so it contributes the FACE light, not 0 (vanilla
+    /// smooth lighting). Averaging in an opaque neighbor's 0 was over-darkening every
+    /// pit wall, floor and underside — a 1-wide pit floor came out 8/15 instead of 15.
     func cornerLight(
         _ ox: Int, _ oy: Int, _ oz: Int,
         _ ux: Int, _ uy: Int, _ uz: Int,
@@ -167,13 +171,17 @@ final class SectionMesher {
     ) -> Int {
         let get = sky ? skyAt : blkAt
         let a = get(ox, oy, oz)
-        let b = get(ox + ux * du, oy + uy * du, oz + uz * du)
-        let c = get(ox + vx * dv, oy + vy * dv, oz + vz * dv)
-        let dcell = cellAt(ox + ux * du + vx * dv, oy + uy * du + vy * dv, oz + uz * du + vz * dv)
-        let occluded = OPAQUE[dcell >> 4] == 1
-            && OPAQUE[cellAt(ox + ux * du, oy + uy * du, oz + uz * du) >> 4] == 1
-            && OPAQUE[cellAt(ox + vx * dv, oy + vy * dv, oz + vz * dv) >> 4] == 1
-        let d = occluded ? a : get(ox + ux * du + vx * dv, oy + uy * du + vy * dv, oz + uz * du + vz * dv)
+        let uOpaque = OPAQUE[cellAt(ox + ux * du, oy + uy * du, oz + uz * du) >> 4] == 1
+        let vOpaque = OPAQUE[cellAt(ox + vx * dv, oy + vy * dv, oz + vz * dv) >> 4] == 1
+        let b = uOpaque ? a : get(ox + ux * du, oy + uy * du, oz + uz * du)
+        let c = vOpaque ? a : get(ox + vx * dv, oy + vy * dv, oz + vz * dv)
+        let d: Int
+        if uOpaque && vOpaque {
+            d = a   // both sides closed — the diagonal can't carry light in, use the face
+        } else {
+            let dOpaque = OPAQUE[cellAt(ox + ux * du + vx * dv, oy + uy * du + vy * dv, oz + uz * du + vz * dv) >> 4] == 1
+            d = dOpaque ? a : get(ox + ux * du + vx * dv, oy + uy * du + vy * dv, oz + uz * du + vz * dv)
+        }
         return Int(detRound(Double(a + b + c + d) / 4))
     }
 
@@ -489,10 +497,15 @@ final class SectionMesher {
             }
             // ceiling vine when block above is solid
             if OPAQUE[cellAt(x, y + 1, z) >> 4] == 1 {
-                // typed local: same type-checker-budget hazard as the d==1 case
-                // below (arithmetic unchanged → mesh goldens unaffected)
-                let cy: Double = yd - 1.0 / 16 + 15.0 / 16 - 14.0 / 16
-                emitFlatTop(b, xd, cy, zd, tile, sky, blk, tint, 15.0 / 16)
+                // single ops on typed locals: a chained literal expression
+                // overruns the Swift type-checker on some toolchains. Same
+                // arithmetic and order → mesh goldens unaffected.
+                let cyA: Double = 1.0 / 16.0
+                let cyB: Double = 15.0 / 16.0
+                let cyC: Double = 14.0 / 16.0
+                let cy: Double = yd - cyA + cyB - cyC
+                let cyH: Double = 15.0 / 16.0
+                emitFlatTop(b, xd, cy, zd, tile, sky, blk, tint, cyH)
             }
             return
         }
@@ -500,11 +513,17 @@ final class SectionMesher {
         let d = meta % 6
         if d == 0 { emitFlatTop(b, xd, yd - 14.0 / 16, zd, tile, sky, blk, tint, 15.0 / 16) }
         else if d == 1 {
-            // hoisted into typed locals: the inline literal chain overruns the
-            // Swift type-checker's budget on newer toolchains (arithmetic is
-            // unchanged, so mesh goldens are unaffected)
-            let oy: Double = yd + 14.2 / 16 - 14.0 / 16
-            let oh: Double = 1.0 / 16 + 14.2 / 16 - 15.0 / 16 + 14.0 / 16
+            // single ops on typed locals: the chained literal expressions
+            // overrun the Swift type-checker on some toolchains (Swift 6.2.4 /
+            // Xcode 26.3). Same arithmetic and order → mesh goldens unaffected.
+            let oyA: Double = 14.2 / 16.0
+            let oyB: Double = 14.0 / 16.0
+            let oy: Double = yd + oyA - oyB
+            let ohA: Double = 1.0 / 16.0
+            let ohB: Double = 14.2 / 16.0
+            let ohC: Double = 15.0 / 16.0
+            let ohD: Double = 14.0 / 16.0
+            let oh: Double = ohA + ohB - ohC + ohD
             emitFlatTop(b, xd, oy, zd, tile, sky, blk, tint, oh)
         }
         else {

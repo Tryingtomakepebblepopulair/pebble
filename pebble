@@ -18,29 +18,92 @@ REPO="$(cd "$(dirname "$SRC")" && pwd)"
 APP_NAME="Pebble"
 APP_DIR="$HOME/Applications"
 APP="$APP_DIR/$APP_NAME.app"
+# Pebble's source builds on Swift 6.0+ (Package.swift's floor; verified 6.0→6.3).
+# If the user is below that, we offer to install this exact stable toolchain via
+# swiftly and build with it — PEBBLE_SWIFT points the build at whatever we use.
+SWIFT_FALLBACK="6.3.2"
+PEBBLE_SWIFT="swift"
 BOLD=$'\033[1m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RESET=$'\033[0m'
 
 say()  { echo "${BOLD}${GREEN}==>${RESET}${BOLD} $*${RESET}"; }
 warn() { echo "${BOLD}${YELLOW}warning:${RESET} $*"; }
 die()  { echo "${BOLD}error:${RESET} $*" >&2; exit 1; }
 
+# echoes the running Swift as "MAJOR MINOR", or nothing if it can't be parsed
+swift_version() {
+    swift --version 2>/dev/null | grep -oE 'version [0-9]+\.[0-9]+' | head -1 \
+        | awk '{print $2}' | awk -F. '{print $1, $2}'
+}
+
+# install swiftly + Swift $SWIFT_FALLBACK into the user's home (no admin), then
+# point the build at it. Every step here is the exact sequence swiftly documents.
+install_swift_via_swiftly() {
+    command -v curl >/dev/null 2>&1 || die "curl not found — can't fetch Swift automatically; update Xcode instead"
+    local pkg; pkg="$(mktemp -t swiftly)" || die "mktemp failed"
+    say "Downloading swiftly (Swift toolchain manager)…"
+    curl -fsSL -o "$pkg.pkg" https://download.swift.org/swiftly/darwin/swiftly.pkg || die "swiftly download failed"
+    installer -pkg "$pkg.pkg" -target CurrentUserHomeDirectory >/dev/null || die "swiftly install failed"
+    rm -f "$pkg" "$pkg.pkg"
+    local sw="$HOME/.swiftly/bin/swiftly"
+    [ -x "$sw" ] || die "swiftly missing after install"
+    export SWIFTLY_HOME_DIR="$HOME/.swiftly" SWIFTLY_BIN_DIR="$HOME/.swiftly/bin"
+    "$sw" init --assume-yes --skip-install --no-modify-profile >/dev/null 2>&1 || true
+    say "Installing Swift ${SWIFT_FALLBACK} (~1.6 GB, one time)…"
+    "$sw" install "$SWIFT_FALLBACK" --assume-yes || die "Swift ${SWIFT_FALLBACK} install failed"
+    # swiftly drops .0 patch numbers from the bundle name (6.3.0 -> swift-6.3-RELEASE)
+    local tc bundle
+    for bundle in "swift-${SWIFT_FALLBACK}-RELEASE" "swift-${SWIFT_FALLBACK%.0}-RELEASE"; do
+        tc="$HOME/Library/Developer/Toolchains/$bundle.xctoolchain/usr/bin/swift"
+        [ -x "$tc" ] && { PEBBLE_SWIFT="$tc"; break; }
+    done
+    [ -x "$PEBBLE_SWIFT" ] || die "couldn't locate the installed Swift ${SWIFT_FALLBACK}"
+    say "Swift ${SWIFT_FALLBACK} ready."
+}
+
 need_swift() {
     # `command -v swift` always succeeds on macOS (the OS ships a shim), so
-    # gate on the actual developer-tools install instead
-    xcode-select -p >/dev/null 2>&1 || die "Xcode command-line tools not found. Install them with:  xcode-select --install"
+    # gate on the actual developer-tools install instead. No dev tools = no Swift
+    # AND no macOS SDK; installing the CLT ships both (a current Swift + the SDK),
+    # which swiftly alone can't provide — so this is the right call here.
+    xcode-select -p >/dev/null 2>&1 || die "No Swift / developer tools found. Install Apple's command-line tools (this includes Swift):
+       xcode-select --install
+  then re-run:  ./pebble install"
+
+    # Pebble needs Swift 6.0+ (Package.swift's tools-version; verified to build on
+    # every 6.0→6.3 toolchain). Below that, SwiftPM bails with a cryptic manifest
+    # error mid-install, so catch it up front and offer a clean way forward.
+    local maj="" min=""
+    read -r maj min < <(swift_version) || true   # empty/unparseable -> fall through to offer
+    if [ -n "$maj" ] && { [ "$maj" -gt 6 ] || { [ "$maj" -eq 6 ] && [ "$min" -ge 0 ]; }; }; then
+        return  # Swift 6.0+ — good to go
+    fi
+
+    local have="unknown"; [ -n "${maj:-}" ] && have="$maj.$min"
+    warn "Pebble needs Swift 6.0 or newer — found: $have."
+    echo "  Simplest fix: update Xcode (App Store) or the command-line tools, which ships a current Swift:"
+    echo "      softwareupdate --all --install --force"
+    echo
+    echo "  Or install Swift ${SWIFT_FALLBACK} just for Pebble (via swiftly, into your home, no admin)."
+    [ -t 0 ] || die "non-interactive shell — update Swift to 6.0+, then re-run: ./pebble install"
+    printf "  Install Swift %s now? [y/N] " "$SWIFT_FALLBACK"
+    local ans=""; read -r ans || true   # EOF/Ctrl-D -> empty -> treated as decline
+    case "$ans" in
+        y|Y|yes|YES) install_swift_via_swiftly ;;
+        *) die "cancelled — update Swift to 6.0+ and re-run: ./pebble install" ;;
+    esac
 }
 
 build() {
     say "Building Pebble (release)…"
     # not a terminal (CI, piped): plain passthrough
     if [ ! -t 1 ]; then
-        (cd "$REPO" && swift build -c release)
+        (cd "$REPO" && "$PEBBLE_SWIFT" build -c release)
         return
     fi
     # release mode compiles the whole engine as one optimized unit and SwiftPM
     # prints nothing for minutes — spin so it doesn't look frozen
     local log; log="$(mktemp /tmp/pebble-build.XXXXXX)"
-    (cd "$REPO" && swift build -c release >"$log" 2>&1) &
+    (cd "$REPO" && "$PEBBLE_SWIFT" build -c release >"$log" 2>&1) &
     local pid=$!
     trap 'kill "$pid" 2>/dev/null; printf "\r\033[K"; exit 130' INT TERM
     local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 start=$SECONDS last=""
@@ -117,7 +180,7 @@ cmd_update() {
 }
 
 cmd_run()  { open "$APP" 2>/dev/null || die "Pebble isn't installed yet — run: pebble install"; }
-cmd_test() { need_swift; (cd "$REPO" && swift run -c release pebsmoke); }
+cmd_test() { need_swift; (cd "$REPO" && "$PEBBLE_SWIFT" run -c release pebsmoke); }
 
 case "${1:-}" in
     install) cmd_install ;;
