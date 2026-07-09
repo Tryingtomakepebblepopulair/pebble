@@ -73,10 +73,18 @@ public let DEFAULT_KEYBINDS: [String: String] = [
 
 public func defaultSettings() -> Settings { Settings() }
 
-/// ~/Library/Application Support/Pebble — created on first touch
+/// ~/Library/Application Support/Pebble — created on first touch.
+/// `PEBBLE_DATA_DIR` overrides the root (CI, tests, and servers point this at
+/// temp dirs so they never touch real user data — PORTING module 04). Read
+/// via getenv on every call so a process can set it before first storage use.
 public func vcSupportDir() -> URL {
-    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    let dir = base.appendingPathComponent("Pebble", isDirectory: true)
+    let dir: URL
+    if let raw = getenv("PEBBLE_DATA_DIR"), raw.pointee != 0 {
+        dir = URL(fileURLWithPath: String(cString: raw), isDirectory: true)
+    } else {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        dir = base.appendingPathComponent("Pebble", isDirectory: true)
+    }
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     return dir
 }

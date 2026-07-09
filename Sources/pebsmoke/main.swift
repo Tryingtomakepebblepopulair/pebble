@@ -6,6 +6,15 @@ import Foundation
 import simd
 import PebbleCore
 
+// Hermetic data root: unless the caller pinned one, every store (saves,
+// settings, social, skins) works under a throwaway temp dir — smoke runs
+// must never touch real user data (PORTING modules 04/13).
+if getenv("PEBBLE_DATA_DIR") == nil {
+    let root = NSTemporaryDirectory() + "pebsmoke-\(ProcessInfo.processInfo.processIdentifier)"
+    setenv("PEBBLE_DATA_DIR", root, 1)
+}
+print("[smoke] data root: \(vcSupportDir().path)")
+
 var passed = 0
 var failed = 0
 
