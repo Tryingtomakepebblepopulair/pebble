@@ -1,0 +1,32 @@
+# CI — PORTING module 13 (first slice): every push builds the full package on
+# macOS and runs the 512-check golden suite under a temp data root.
+# PEBBLE_REGOLD is forbidden in CI: goldens are frozen.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  macos:
+    name: macOS build + goldens
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain info
+        run: |
+          swift --version
+          uname -m
+          sw_vers
+      - name: Refuse regold
+        run: |
+          if [ -n "${PEBBLE_REGOLD:-}" ]; then
+            echo "PEBBLE_REGOLD must never be set in CI"; exit 1
+          fi
+      - name: Build (release, all targets)
+        run: swift build -c release
+      - name: Golden suite (hermetic data root)
+        run: PEBBLE_DATA_DIR="$RUNNER_TEMP/pebble-data" swift run -c release pebsmoke
+      - name: Goldens unmodified
+        run: git diff --exit-code goldens/
