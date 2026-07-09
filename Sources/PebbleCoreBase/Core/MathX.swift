@@ -124,3 +124,14 @@ public func rayAABB(_ ox: Double, _ oy: Double, _ oz: Double, _ dx: Double, _ dy
     return tmin >= 0 ? tmin : tmax
 }
 
+
+public func wrapAngle(_ a: Double) -> Double {
+    var a = a
+    while a > .pi { a -= .pi * 2 }
+    while a < -.pi { a += .pi * 2 }
+    return a
+}
+
+public func prettyEntityName(_ type: String) -> String {
+    type.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+}

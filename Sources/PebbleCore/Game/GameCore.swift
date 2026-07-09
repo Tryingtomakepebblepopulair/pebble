@@ -2715,10 +2715,6 @@ public final class GameCore {
 
 // ---- death messages -------------------------------------------------------------
 /// "wither_skeleton" → "Wither Skeleton"
-public func prettyEntityName(_ type: String) -> String {
-    type.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
-}
-
 /// vanilla 1.20 death-message grammar, with attacker names and the
 /// "whilst trying to escape" variants for environmental deaths
 public func deathCauseText(_ source: String?, _ attacker: String? = nil) -> String {
@@ -2769,12 +2765,6 @@ public func deathCauseText(_ source: String?, _ attacker: String? = nil) -> Stri
 }
 
 // ---- small math helpers -------------------------------------------------------
-func wrapAngle(_ a: Double) -> Double {
-    var a = a
-    while a > .pi { a -= .pi * 2 }
-    while a < -.pi { a += .pi * 2 }
-    return a
-}
 
 func rayBoxT(_ ox: Double, _ oy: Double, _ oz: Double,
              _ dx: Double, _ dy: Double, _ dz: Double,

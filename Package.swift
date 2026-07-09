@@ -8,9 +8,22 @@ let package = Package(
     name: "Pebble",
     platforms: [.macOS(.v14)],
     targets: [
-        // the engine: headless-testable, no AppKit dependencies
+        // the portable deterministic core: simulation, worldgen, entities,
+        // items, systems, registries, protocol/social value types. No Apple
+        // frameworks — this target is the Windows-buildable slice (PORTING 01)
+        .target(
+            name: "PebbleCoreBase",
+            path: "Sources/PebbleCoreBase",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        // the engine runtime: GameCore orchestration + Apple-backed services
+        // (SQLite saves, Network.framework transport, simd render math).
+        // Re-exports PebbleCoreBase so existing imports see the full surface
         .target(
             name: "PebbleCore",
+            dependencies: ["PebbleCoreBase"],
             path: "Sources/PebbleCore",
             swiftSettings: [
                 .swiftLanguageMode(.v5),

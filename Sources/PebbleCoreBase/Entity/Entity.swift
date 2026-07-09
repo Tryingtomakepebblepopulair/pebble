@@ -3,7 +3,7 @@
 
 import Foundation
 
-@inline(__always) func ifloor(_ x: Double) -> Int { Int(x.rounded(.down)) }
+@inline(__always) public func ifloor(_ x: Double) -> Int { Int(x.rounded(.down)) }
 
 private var nextEntityId = 1
 /// true reset (not a ratchet) — called on world load so id sequences don't
