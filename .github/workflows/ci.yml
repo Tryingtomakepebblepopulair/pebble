@@ -30,3 +30,18 @@ jobs:
         run: PEBBLE_DATA_DIR="$RUNNER_TEMP/pebble-data" swift run -c release pebsmoke
       - name: Goldens unmodified
         run: git diff --exit-code goldens/
+
+  windows:
+    name: Windows portable core
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: compnerd/gha-setup-swift@v3
+        with:
+          branch: swift-6.0.3-release
+          tag: 6.0.3-RELEASE
+      - uses: actions/checkout@v4
+      - name: Toolchain info
+        run: swift --version
+      - name: Build the portable deterministic core
+        run: swift build --target PebbleCoreBase
