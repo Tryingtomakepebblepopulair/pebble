@@ -95,6 +95,23 @@ let package = Package(
             path: "Sources/pebsmokecore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // the Vulkan backend behind a C ABI (PORTING module 07) — Windows
+        // bodies, stubs elsewhere; vulkan-1.dll loads at runtime (no SDK)
+        .target(
+            name: "CPebbleVulkan",
+            path: "Sources/CPebbleVulkan"
+        ),
+        // the Windows client shell: Win32 window + message pump + Vulkan
+        // (PORTING module 09 bootstrap) — a friendly stub on other platforms
+        .executableTarget(
+            name: "PebbleWin",
+            dependencies: ["PebbleCoreBase", "CPebbleVulkan"],
+            path: "Sources/PebbleWin",
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                .linkedLibrary("user32", .when(platforms: [.windows])),
+            ]
+        ),
         // dedicated LAN/SMP server: runs a world headless, no host player.
         // Portable — on macOS it links the Apple adapter for Bonjour, on
         // Windows it serves direct-IP over the socket transport (PORTING 12)
