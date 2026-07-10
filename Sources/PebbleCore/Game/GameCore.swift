@@ -36,14 +36,14 @@ public final class LoadProf {
     public let enabled = ProcessInfo.processInfo.environment["PEBBLE_PROF"] != nil
     private var lock = NSLock()
     private var buckets: [String: (count: Int, ms: Double)] = [:]
-    private var lastPrint = CFAbsoluteTimeGetCurrent()
+    private var lastPrint = monotonicNow()
 
     @inline(__always)
     public func time<T>(_ name: String, _ body: () -> T) -> T {
         if !enabled { return body() }
-        let t0 = CFAbsoluteTimeGetCurrent()
+        let t0 = monotonicNow()
         let r = body()
-        let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        let ms = (monotonicNow() - t0) * 1000
         lock.lock()
         let b = buckets[name] ?? (0, 0)
         buckets[name] = (b.count + 1, b.ms + ms)
@@ -52,7 +52,7 @@ public final class LoadProf {
     }
     public func tickPrint() {
         guard enabled else { return }
-        let now = CFAbsoluteTimeGetCurrent()
+        let now = monotonicNow()
         if now - lastPrint < 2 { return }
         lastPrint = now
         lock.lock()
@@ -1030,11 +1030,11 @@ public final class GameCore {
                 ready.append((key, c, (c.cx - pcx) * (c.cx - pcx) + (c.cz - pcz) * (c.cz - pcz)))
             }
             ready.sort { $0.d < $1.d }
-            let t0 = CFAbsoluteTimeGetCurrent()
+            let t0 = monotonicNow()
             for r in ready {
                 q.remove(r.key)
                 lightChunk(w, r.c)
-                if (CFAbsoluteTimeGetCurrent() - t0) * 1000 > LIGHT_BUDGET_MS { break }
+                if (monotonicNow() - t0) * 1000 > LIGHT_BUDGET_MS { break }
             }
         }
         // self-heal: any chunk that slipped through the queue gets re-queued

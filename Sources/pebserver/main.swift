@@ -169,11 +169,11 @@ Thread.detachNewThread {
 }
 
 // ---- 20 TPS loop ----------------------------------------------------------------
-var lastTick = CFAbsoluteTimeGetCurrent()
+var lastTick = monotonicNow()
 let timer = DispatchSource.makeTimerSource(queue: .main)
 timer.schedule(deadline: .now(), repeating: .milliseconds(50), leeway: .milliseconds(5))
 timer.setEventHandler {
-    let now = CFAbsoluteTimeGetCurrent()
+    let now = monotonicNow()
     let dt = (now - lastTick) * 1000
     lastTick = now
     _ = game.frame(dtMs: dt)
