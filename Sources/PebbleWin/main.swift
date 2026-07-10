@@ -107,7 +107,7 @@ if atlasOK != 0 {
 }
 plog("atlas uploaded: \(atlas.count) tiles (\(TILE)×\(TILE))")
 
-let SEED: UInt32 = 424242
+let SEED: UInt32 = 12345   // the goldens prove real terrain at this spawn
 let RADIUS = 3   // chunks each way — 7×7 island of terrain
 
 struct LitChunk {
@@ -173,6 +173,7 @@ func sectionHasBlocks(_ c: LitChunk, _ sy: Int) -> Bool {
 
 var sectionCount = 0
 var vertexTotal = 0
+var firstVertexA: UInt32? = nil
 for cz in -RADIUS...RADIUS {
     for cx in -RADIUS...RADIUS {
         let c = litChunk(cx, cz)
@@ -183,6 +184,7 @@ for cz in -RADIUS...RADIUS {
             let ox = Double(cx * 16), oy = Double(GEN_MIN_Y + sy * 16), oz = Double(cz * 16)
             for (pass, layer) in [(0, mesh.opaque), (1, mesh.cutout), (2, mesh.translucent)] {
                 if layer.count == 0 { continue }
+                if pass == 0, firstVertexA == nil, layer.data.count > 5 { firstVertexA = layer.data[5] }
                 let rc = layer.data.withUnsafeBufferPointer { vp in
                     layer.idx.withUnsafeBufferPointer { ip in
                         pb_vk_upload_section(id, Int32(pass), ox, oy, oz,
@@ -202,6 +204,10 @@ for cz in -RADIUS...RADIUS {
 }
 plog(String(format: "world ready: %d chunks, %d sections, %d vertices in %.1fs",
             (2 * RADIUS + 1) * (2 * RADIUS + 1), sectionCount, vertexTotal, monotonicNow() - tGen0))
+if let probe = firstVertexA {
+    let sky = (probe >> 17) & 15, blk = (probe >> 21) & 15
+    plog("light probe: first vertex A=\(String(probe, radix: 16)) tile=\(probe & 4095) sky=\(sky) blk=\(blk) (sky>0 means sunlight data is good)")
+}
 
 // camera focus: the terrain surface at the center column
 let center = litChunk(0, 0)
@@ -225,9 +231,11 @@ mainLoop: while true {
         DispatchMessageW(&msg)
     }
     let t = monotonicNow() - t0
-    // one Pebble day in 120 seconds, starting mid-morning
-    let dayPhase = 0.25 + t / 120.0
-    let dayLight = Float(max(0.02, 0.5 - 0.5 * cos(dayPhase * 2 * .pi)))
+    // hold high noon for 30s (diagnosis: terrain MUST be bright here), then
+    // one Pebble day per 240s with a friendly night floor
+    let cyc = max(0, t - 30)
+    let dayPhase = 0.5 + cyc / 240.0
+    let dayLight = Float(max(0.10, 0.5 - 0.5 * cos(dayPhase * 2 * .pi)))
     let skyR = 0.02 + 0.50 * dayLight
     let skyG = 0.03 + 0.63 * dayLight
     let skyB = 0.08 + 0.82 * dayLight
@@ -246,16 +254,16 @@ mainLoop: while true {
     let viewProj = proj * view
     viewProj.m.withUnsafeBufferPointer {
         pb_vk_set_camera($0.baseAddress, eyeX, eyeY, eyeZ,
-                         Float(t), dayLight, 0, 0,
-                         70, 115, 0.5,
+                         Float(t), dayLight, 0, 0.05,
+                         80, 150, 0.35,
                          Float(skyR), Float(skyG), Float(skyB))
     }
     _ = pb_vk_frame(Float(skyR), Float(skyG), Float(skyB))
     frames += 1
     let now = monotonicNow()
     if now - lastReport >= 5 {
-        plog(String(format: "%.0f fps (vsync), %dx%d", Double(frames) / (now - lastReport),
-                    resizedW, resizedH))
+        plog(String(format: "%.0f fps (vsync), %dx%d, dayLight %.2f", Double(frames) / (now - lastReport),
+                    resizedW, resizedH, dayLight))
         frames = 0
         lastReport = now
     }
