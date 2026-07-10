@@ -8,11 +8,24 @@ let package = Package(
     name: "Pebble",
     platforms: [.macOS(.v14)],
     targets: [
+        // project-owned SQLite (public domain, amalgamation 3.53.3) — the same
+        // database engine on every platform; Windows has no system SQLite3
+        // module, so Pebble ships its own (PORTING module 04)
+        .target(
+            name: "CSQLite",
+            path: "Sources/CSQLite",
+            cSettings: [
+                .define("SQLITE_THREADSAFE", to: "1"),      // serialized — SaveDB opens FULLMUTEX
+                .define("SQLITE_OMIT_LOAD_EXTENSION"),      // no dlopen dependency
+                .define("SQLITE_ENABLE_API_ARMOR"),
+            ]
+        ),
         // the portable deterministic core: simulation, worldgen, entities,
         // items, systems, registries, protocol/social value types. No Apple
         // frameworks — this target is the Windows-buildable slice (PORTING 01)
         .target(
             name: "PebbleCoreBase",
+            dependencies: ["CSQLite"],
             path: "Sources/PebbleCoreBase",
             swiftSettings: [
                 .swiftLanguageMode(.v5),

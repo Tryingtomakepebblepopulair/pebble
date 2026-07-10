@@ -1,0 +1,355 @@
+// Persistence — a single SQLite database at
+// <data root>/pebble.db (WAL mode, fully mutexed):
+//   worlds(id, json, lastPlayed)            — world metadata + global state
+//   chunks(world, dim, cx, cz, data BLOB)   — modified chunks (VCK1 binary)
+//   player(world, json)                     — player snapshot per world
+//   advancements(world, json)               — earned advancement ids per world
+// Record value types live in SaveRecords.swift; this file is the SQLite
+// store (project-owned CSQLite on every platform — PORTING module 04).
+
+import Foundation
+import CSQLite
+
+/// JSON can't carry NaN/Infinity (structured clone could) — scrub them so one
+/// blown-up velocity never poisons a whole chunk record
+private func sanitizeJSON(_ v: Any) -> Any {
+    if let d = v as? Double { return d.isFinite ? d : 0 }
+    if let arr = v as? [Any] { return arr.map(sanitizeJSON) }
+    if let dict = v as? [String: Any] { return dict.mapValues(sanitizeJSON) }
+    return v
+}
+
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+public final class SaveDB {
+    private var db: OpaquePointer?
+
+    public init() {
+        let url = vcSupportDir().appendingPathComponent("pebble.db")
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK else {
+            fatalError("pebble.db could not be opened: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        exec("PRAGMA journal_mode=WAL")
+        exec("PRAGMA synchronous=NORMAL")
+        exec("PRAGMA busy_timeout=5000")
+        exec("""
+        CREATE TABLE IF NOT EXISTS worlds(
+            id TEXT PRIMARY KEY, json TEXT NOT NULL, lastPlayed REAL NOT NULL DEFAULT 0)
+        """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS chunks(
+            world TEXT NOT NULL, dim INTEGER NOT NULL, cx INTEGER NOT NULL, cz INTEGER NOT NULL,
+            data BLOB NOT NULL, PRIMARY KEY(world, dim, cx, cz)) WITHOUT ROWID
+        """)
+        exec("CREATE TABLE IF NOT EXISTS player(world TEXT PRIMARY KEY, json TEXT NOT NULL)")
+        exec("CREATE TABLE IF NOT EXISTS advancements(world TEXT PRIMARY KEY, json TEXT NOT NULL)")
+        migrateLegacySaves()
+    }
+
+    deinit { sqlite3_close(db) }
+
+    // ---- tiny statement helpers -------------------------------------------------
+    @discardableResult
+    private func exec(_ sql: String) -> Bool {
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+            print("[saves] exec failed: \(String(cString: sqlite3_errmsg(db))) — \(sql.prefix(60))")
+            return false
+        }
+        return true
+    }
+
+    /// prepare + bind + step a statement; row() is called once per result row.
+    /// returns false (and logs) on prepare/step errors — a silently failed
+    /// write (disk full, SQLITE_ERROR) is data loss
+    @discardableResult
+    private func run(_ sql: String, bind: ((OpaquePointer) -> Void)? = nil,
+                     row: ((OpaquePointer) -> Void)? = nil) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            print("[saves] prepare failed: \(String(cString: sqlite3_errmsg(db))) — \(sql.prefix(60))")
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+        bind?(stmt)
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW { row?(stmt); rc = sqlite3_step(stmt) }
+        if rc != SQLITE_DONE {
+            print("[saves] step failed (\(rc)): \(String(cString: sqlite3_errmsg(db))) — \(sql.prefix(60))")
+            return false
+        }
+        return true
+    }
+
+    private func bindText(_ stmt: OpaquePointer, _ idx: Int32, _ s: String) {
+        sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT)
+    }
+    private func columnText(_ stmt: OpaquePointer, _ idx: Int32) -> String? {
+        sqlite3_column_text(stmt, idx).map { String(cString: $0) }
+    }
+
+    // ---- worlds ---------------------------------------------------------------
+    public func listWorlds() -> [WorldRecord] {
+        var out: [WorldRecord] = []
+        run("SELECT json FROM worlds", row: { stmt in
+            if let json = self.columnText(stmt, 0),
+               let rec = try? JSONDecoder().decode(WorldRecord.self, from: Data(json.utf8)) {
+                out.append(rec)
+            }
+        })
+        return out
+    }
+    public func getWorld(_ id: String) -> WorldRecord? {
+        var rec: WorldRecord?
+        run("SELECT json FROM worlds WHERE id=?", bind: { self.bindText($0, 1, id) }) { stmt in
+            if let json = self.columnText(stmt, 0) {
+                rec = try? JSONDecoder().decode(WorldRecord.self, from: Data(json.utf8))
+            }
+        }
+        return rec
+    }
+    public func putWorld(_ rec: WorldRecord) {
+        guard let data = try? JSONEncoder().encode(rec), let json = String(data: data, encoding: .utf8) else { return }
+        run("INSERT OR REPLACE INTO worlds(id, json, lastPlayed) VALUES(?,?,?)", bind: { stmt in
+            self.bindText(stmt, 1, rec.id)
+            self.bindText(stmt, 2, json)
+            sqlite3_bind_double(stmt, 3, rec.lastPlayed)
+        })
+    }
+    public func deleteWorld(_ id: String) {
+        exec("BEGIN")
+        for table in ["worlds", "chunks", "player", "advancements"] {
+            let col = table == "worlds" ? "id" : "world"
+            run("DELETE FROM \(table) WHERE \(col)=?", bind: { self.bindText($0, 1, id) })
+        }
+        // LAN guests' player data rides in the player table as "worldId#name"
+        run("DELETE FROM player WHERE world LIKE ?", bind: { self.bindText($0, 1, id + "#%") })
+        exec("COMMIT")
+    }
+
+    // ---- chunks ---------------------------------------------------------------
+    public func chunkKey(_ worldId: String, _ dim: Int, _ cx: Int, _ cz: Int) -> String {
+        "\(worldId):\(dim):\(cx),\(cz)"
+    }
+
+    /// all saved chunk keys for a world — lets the streamer skip the DB for fresh chunks
+    public func getChunkKeys(_ worldId: String) -> Set<String> {
+        var keys = Set<String>()
+        run("SELECT dim, cx, cz FROM chunks WHERE world=?", bind: { self.bindText($0, 1, worldId) }) { stmt in
+            let dim = Int(sqlite3_column_int(stmt, 0))
+            let cx = Int(sqlite3_column_int(stmt, 1))
+            let cz = Int(sqlite3_column_int(stmt, 2))
+            keys.insert(self.chunkKey(worldId, dim, cx, cz))
+        }
+        return keys
+    }
+
+    public func getChunk(_ worldId: String, _ dim: Int, _ cx: Int, _ cz: Int) -> ChunkRecord? {
+        var rec: ChunkRecord?
+        run("SELECT data FROM chunks WHERE world=? AND dim=? AND cx=? AND cz=?", bind: { stmt in
+            self.bindText(stmt, 1, worldId)
+            sqlite3_bind_int(stmt, 2, Int32(dim))
+            sqlite3_bind_int(stmt, 3, Int32(cx))
+            sqlite3_bind_int(stmt, 4, Int32(cz))
+        }) { stmt in
+            if let bytes = sqlite3_column_blob(stmt, 0) {
+                let count = Int(sqlite3_column_bytes(stmt, 0))
+                let data = Data(bytes: bytes, count: count)
+                rec = self.decodeChunk(data, key: self.chunkKey(worldId, dim, cx, cz),
+                                       worldId: worldId, dim: dim, cx: cx, cz: cz)
+            }
+        }
+        return rec
+    }
+
+    /// batch write — one transaction, mirrors the once-per-second save tick.
+    /// false = the batch did not land (rolled back); callers must re-mark the
+    /// chunks dirty or the edits are silently lost
+    @discardableResult
+    public func putChunks(_ records: [ChunkRecord]) -> Bool {
+        guard !records.isEmpty else { return true }
+        guard exec("BEGIN") else { return false }
+        var ok = true
+        for r in records {
+            guard let data = encodeChunk(r) else { ok = false; continue }
+            let wrote = run("INSERT OR REPLACE INTO chunks(world, dim, cx, cz, data) VALUES(?,?,?,?,?)", bind: { stmt in
+                self.bindText(stmt, 1, r.worldId)
+                sqlite3_bind_int(stmt, 2, Int32(r.dim))
+                sqlite3_bind_int(stmt, 3, Int32(r.cx))
+                sqlite3_bind_int(stmt, 4, Int32(r.cz))
+                data.withUnsafeBytes { raw in
+                    _ = sqlite3_bind_blob(stmt, 5, raw.baseAddress, Int32(raw.count), SQLITE_TRANSIENT)
+                }
+            })
+            ok = ok && wrote
+        }
+        if ok {
+            ok = exec("COMMIT")
+        } else {
+            exec("ROLLBACK")
+        }
+        return ok
+    }
+
+    // binary container: "VCK1" | u8 flags | [u32 nBlocks, u16[] LE, u32 nBiomes, u8[]] | u32 jsonLen, json
+    private func encodeChunk(_ r: ChunkRecord) -> Data? {
+        var data = Data("VCK1".utf8)
+        let hasBlocks = r.blocks != nil && r.biomes != nil
+        data.append(hasBlocks ? 1 : 0)
+        func putU32(_ v: Int) {
+            var le = UInt32(v).littleEndian
+            withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
+        }
+        if hasBlocks {
+            let blocks = r.blocks!, biomes = r.biomes!
+            putU32(blocks.count)
+            blocks.withUnsafeBufferPointer { bp in
+                bp.baseAddress!.withMemoryRebound(to: UInt8.self, capacity: blocks.count * 2) { p in
+                    data.append(p, count: blocks.count * 2)  // host LE on all Apple silicon/x86
+                }
+            }
+            putU32(biomes.count)
+            data.append(contentsOf: biomes)
+        }
+        var tail: [String: Any] = ["entities": r.entities.map(sanitizeJSON)]
+        if let bes = r.blockEntities,
+           let enc = try? JSONEncoder().encode(bes),
+           let obj = try? JSONSerialization.jsonObject(with: enc) {
+            tail["blockEntities"] = obj
+        }
+        guard let json = try? JSONSerialization.data(withJSONObject: tail) else { return nil }
+        putU32(json.count)
+        data.append(json)
+        return data
+    }
+
+    private func decodeChunk(_ data: Data, key: String, worldId: String, dim: Int, cx: Int, cz: Int) -> ChunkRecord? {
+        var rec = ChunkRecord(key: key, worldId: worldId, dim: dim, cx: cx, cz: cz)
+        var off = 0
+        func readU32() -> Int? {
+            guard off + 4 <= data.count else { return nil }
+            let v = data.subdata(in: off..<off + 4).withUnsafeBytes { $0.load(as: UInt32.self) }
+            off += 4
+            return Int(UInt32(littleEndian: v))
+        }
+        guard data.count >= 5, data.prefix(4) == Data("VCK1".utf8) else { return nil }
+        off = 4
+        let flags = data[off]; off += 1
+        if flags & 1 != 0 {
+            guard let nBlocks = readU32(), off + nBlocks * 2 <= data.count else { return nil }
+            var blocks = [UInt16](repeating: 0, count: nBlocks)
+            data.subdata(in: off..<off + nBlocks * 2).withUnsafeBytes { raw in
+                blocks.withUnsafeMutableBytes { dst in
+                    dst.copyMemory(from: raw)
+                }
+            }
+            off += nBlocks * 2
+            // clamp corrupted ids — blockDefs[cell >> 4] is indexed unchecked
+            // in hot paths, and one bad blob must not crash the game
+            let maxId = UInt16(blockDefs.count)
+            for i in 0..<blocks.count where (blocks[i] >> 4) >= maxId { blocks[i] = 0 }
+            rec.blocks = blocks
+            guard let nBiomes = readU32(), off + nBiomes <= data.count else { return nil }
+            rec.biomes = [UInt8](data.subdata(in: off..<off + nBiomes))
+            off += nBiomes
+        }
+        guard let jsonLen = readU32(), off + jsonLen <= data.count,
+              let tail = try? JSONSerialization.jsonObject(with: data.subdata(in: off..<off + jsonLen)) as? [String: Any]
+        else { return nil }
+        rec.entities = tail["entities"] as? [[String: Any]] ?? []
+        if let rawBE = tail["blockEntities"],
+           let bytes = try? JSONSerialization.data(withJSONObject: rawBE),
+           let bes = try? JSONDecoder().decode([BlockEntityData].self, from: bytes) {
+            rec.blockEntities = bes
+        }
+        return rec
+    }
+
+    // ---- player / advancements --------------------------------------------------
+    public func getPlayer(_ worldId: String) -> [String: Any]? {
+        var out: [String: Any]?
+        run("SELECT json FROM player WHERE world=?", bind: { self.bindText($0, 1, worldId) }) { stmt in
+            if let json = self.columnText(stmt, 0) {
+                out = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any]
+            }
+        }
+        return out
+    }
+    public func putPlayer(_ worldId: String, _ data: [String: Any]) {
+        guard let bytes = try? JSONSerialization.data(withJSONObject: sanitizeJSON(data)),
+              let json = String(data: bytes, encoding: .utf8) else { return }
+        run("INSERT OR REPLACE INTO player(world, json) VALUES(?,?)", bind: { stmt in
+            self.bindText(stmt, 1, worldId)
+            self.bindText(stmt, 2, json)
+        })
+    }
+    public func getAdvancements(_ worldId: String) -> [String]? {
+        var out: [String]?
+        run("SELECT json FROM advancements WHERE world=?", bind: { self.bindText($0, 1, worldId) }) { stmt in
+            if let json = self.columnText(stmt, 0) {
+                out = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String]
+            }
+        }
+        return out
+    }
+    public func putAdvancements(_ worldId: String, _ ids: [String]) {
+        guard let bytes = try? JSONSerialization.data(withJSONObject: ids),
+              let json = String(data: bytes, encoding: .utf8) else { return }
+        run("INSERT OR REPLACE INTO advancements(world, json) VALUES(?,?)", bind: { stmt in
+            self.bindText(stmt, 1, worldId)
+            self.bindText(stmt, 2, json)
+        })
+    }
+
+    // ---- legacy import ----------------------------------------------------------
+    /// one-time import of the pre-1.0 loose-file layout (saves/worlds/*.json,
+    /// saves/chunks/<id>/*.vck, …); the old folder is renamed, never deleted
+    private func migrateLegacySaves() {
+        let fm = FileManager.default
+        let legacy = vcSupportDir().appendingPathComponent("saves", isDirectory: true)
+        let worldsDir = legacy.appendingPathComponent("worlds")
+        guard fm.fileExists(atPath: worldsDir.path),
+              let files = try? fm.contentsOfDirectory(at: worldsDir, includingPropertiesForKeys: nil),
+              !files.isEmpty else { return }
+
+        var worlds = 0, chunks = 0
+        for f in files where f.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: f),
+                  let rec = try? JSONDecoder().decode(WorldRecord.self, from: data) else { continue }
+            putWorld(rec)
+            worlds += 1
+            let id = rec.id
+            if let pdata = try? Data(contentsOf: legacy.appendingPathComponent("player/\(id).json")),
+               let pobj = (try? JSONSerialization.jsonObject(with: pdata)) as? [String: Any] {
+                putPlayer(id, pobj)
+            }
+            if let adata = try? Data(contentsOf: legacy.appendingPathComponent("advancements/\(id).json")),
+               let aobj = (try? JSONSerialization.jsonObject(with: adata)) as? [String] {
+                putAdvancements(id, aobj)
+            }
+            let cdir = legacy.appendingPathComponent("chunks/\(id)", isDirectory: true)
+            guard let cfiles = try? fm.contentsOfDirectory(at: cdir, includingPropertiesForKeys: nil) else { continue }
+            exec("BEGIN")
+            for cf in cfiles where cf.pathExtension == "vck" {
+                let parts = cf.deletingPathExtension().lastPathComponent.split(separator: "_")
+                guard parts.count == 3, let dim = Int(parts[0]), let cx = Int(parts[1]), let cz = Int(parts[2]),
+                      let cdata = try? Data(contentsOf: cf) else { continue }
+                run("INSERT OR REPLACE INTO chunks(world, dim, cx, cz, data) VALUES(?,?,?,?,?)", bind: { stmt in
+                    self.bindText(stmt, 1, id)
+                    sqlite3_bind_int(stmt, 2, Int32(dim))
+                    sqlite3_bind_int(stmt, 3, Int32(cx))
+                    sqlite3_bind_int(stmt, 4, Int32(cz))
+                    cdata.withUnsafeBytes { raw in
+                        _ = sqlite3_bind_blob(stmt, 5, raw.baseAddress, Int32(raw.count), SQLITE_TRANSIENT)
+                    }
+                })
+                chunks += 1
+            }
+            exec("COMMIT")
+        }
+        let backup = vcSupportDir().appendingPathComponent("saves-legacy-backup")
+        try? fm.moveItem(at: legacy, to: backup)
+        print("[saves] migrated \(worlds) worlds, \(chunks) chunks into pebble.db (old files kept in saves-legacy-backup)")
+        fflush(stdout)
+    }
+}
