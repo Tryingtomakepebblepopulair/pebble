@@ -139,17 +139,26 @@ do {
                 }
             }
             let before = Dictionary(uniqueKeysWithValues: hostPigs().map { (ObjectIdentifier($0), $0.health) })
-            let converged = pumpUntil(200) {
-                g.player.setPos(pigShadow.x + 1, pigShadow.y + 0.5, pigShadow.z)
-                guard let puppet else { return false }
-                return hostPigs().contains { puppet.distanceTo($0) < 2.5 }
-            }
-            let sent = g.netGuest?.sendAttack(pigShadow) ?? false
-            check("guest attack hurts host mob", pumpUntil(100) {
+            func anyPigHurt() -> Bool {
                 hostPigs().contains { pig in
                     pig.dead || pig.health < (before[ObjectIdentifier(pig)] ?? pig.health) - 0.001
                 }
-            }, "sent=\(sent) converged=\(converged) pigs=\(hostPigs().count)")
+            }
+            // pigs wander: a single converge-then-swing can land after the pig
+            // stepped out of reach (flaked in CI) — chase and re-swing instead
+            var sent = false
+            var hurt = false
+            for _ in 0..<8 where !hurt {
+                _ = pumpUntil(50) {
+                    g.player.setPos(pigShadow.x + 1, pigShadow.y + 0.5, pigShadow.z)
+                    guard let puppet else { return false }
+                    return hostPigs().contains { puppet.distanceTo($0) < 2.5 }
+                }
+                sent = (g.netGuest?.sendAttack(pigShadow) ?? false) || sent
+                hurt = pumpUntil(50) { anyPigHurt() }
+            }
+            check("guest attack hurts host mob", hurt,
+                  "sent=\(sent) pigs=\(hostPigs().count)")
         } else {
             check("guest attack hurts host mob", false, "no pig shadow on guest")
         }
