@@ -13,6 +13,7 @@ import PebbleCore
 import PebbleSmokeKit
 
 smokeBootstrapDataRoot()
+installAppleNetTransport()   // the LAN/dedicated e2e exercises the Apple adapter
 
 smokeRandomSuite()
 smokeNoiseSuite()

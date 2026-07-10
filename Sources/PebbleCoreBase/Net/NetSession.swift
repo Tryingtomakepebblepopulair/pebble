@@ -7,7 +7,6 @@
 // entities interpolated toward the host's states.
 
 import Foundation
-import Network
 
 @inline(__always) private func stackJSON(_ s: ItemStack?) -> Data {
     s.flatMap { try? JSONEncoder().encode($0) } ?? Data()
@@ -81,7 +80,7 @@ public final class NetHostSession {
 
     unowned let game: GameCore
     let serviceName: String
-    private let listener = NetListener()
+    private let listener: NetListener = makeNetListener()
     private var guests: [Guest] = []
     private var stopped = false
     /// no host player — a standalone pebserver world

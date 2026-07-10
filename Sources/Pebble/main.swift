@@ -394,6 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         gAppDelegate = self
+        installAppleNetTransport()   // LAN sessions advertise via Bonjour
         let t0 = CFAbsoluteTimeGetCurrent()
         game = GameCore()
         game.host = host

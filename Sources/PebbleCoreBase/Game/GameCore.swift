@@ -4,6 +4,7 @@
 // and input + screens reach the app through the GameHost protocol.
 
 import Foundation
+import Dispatch
 
 // =============================================================================
 // Constants (the frozen baseline)

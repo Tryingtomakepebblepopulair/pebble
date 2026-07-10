@@ -13,6 +13,7 @@ import Foundation
 import PebbleCore
 
 setbuf(stdout, nil)
+installAppleNetTransport()   // macOS servers advertise on Bonjour too
 
 // ---- tiny arg parser --------------------------------------------------------
 let rawArgs = Array(CommandLine.arguments.dropFirst())

@@ -1,19 +1,28 @@
-// LAN transport — Network.framework TCP with Bonjour discovery. Frames are
-// [u32 little-endian length][message bytes]. All callbacks hop to the main
-// queue: the whole game sim is main-thread, so the net layer must be too.
+// Apple LAN transport adapter — Network.framework TCP with Bonjour
+// discovery, implementing the transport-neutral NetConnection/NetListener
+// protocols from PebbleCoreBase (PORTING module 05). All callbacks hop to
+// the main queue: the whole game sim is main-thread, so the net layer must
+// be too. Frame codec is shared with the portable socket transport.
 
 import Foundation
 import Network
 
+/// route GameCore session listeners through Network.framework (+ Bonjour).
+/// The app, macOS pebserver, and the LAN smoke call this once at startup;
+/// without it, sessions use the portable socket transport (no discovery).
+public func installAppleNetTransport() {
+    makeNetListener = { NWNetListener() }
+}
+
 /// one framed TCP connection (host-side accepted socket, or the guest's link)
-public final class NetConnection {
+public final class NWNetConnection: NetConnection {
     let conn: NWConnection
     /// application tag (the host hangs its per-guest state here)
     public var tag: AnyObject?
     public var onMessage: ((NetMsg) -> Void)?
     public var onClosed: ((String) -> Void)?
     public private(set) var closed = false
-    private var buffer = Data()
+    private var parser = NetFrameParser()
 
     public init(_ conn: NWConnection) {
         self.conn = conn
@@ -41,8 +50,13 @@ public final class NetConnection {
             // hop capped throughput at one read per frame and backed up floods
             if let data, !data.isEmpty {
                 DispatchQueue.main.async {
-                    self.buffer.append(data)
-                    self.drainFrames()
+                    if self.closed { return }
+                    if let err = self.parser.feed(data, { msg in
+                        self.onMessage?(msg)
+                        return !self.closed   // handler may close mid-drain
+                    }) {
+                        self.finish(err)
+                    }
                 }
             }
             if isComplete || error != nil {
@@ -55,32 +69,9 @@ public final class NetConnection {
         }
     }
 
-    private func drainFrames() {
-        while buffer.count >= 4 {
-            let len = Int(UInt32(littleEndian: buffer.prefix(4).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }))
-            if len > NET_MAX_FRAME {
-                finish("oversized frame (\(len) bytes)")
-                return
-            }
-            guard buffer.count >= 4 + len else { return }
-            let frame = buffer.subdata(in: (buffer.startIndex + 4)..<(buffer.startIndex + 4 + len))
-            buffer.removeFirst(4 + len)
-            if let msg = try? NetMsg.decode(frame) {
-                onMessage?(msg)
-                if closed { return }   // handler may close mid-drain
-            }
-            // unknown/corrupt frames are skipped — forward compatibility
-        }
-    }
-
     public func send(_ msg: NetMsg) {
         if closed { return }
-        let body = msg.encode()
-        var frame = Data(capacity: body.count + 4)
-        var le = UInt32(body.count).littleEndian
-        withUnsafeBytes(of: &le) { frame.append(contentsOf: $0) }
-        frame.append(body)
-        conn.send(content: frame, completion: .contentProcessed { _ in })
+        conn.send(content: encodeNetFrame(msg), completion: .contentProcessed { _ in })
     }
 
     public func close() {
@@ -99,7 +90,7 @@ public final class NetConnection {
 
 /// host side: listens on TCP and advertises via Bonjour as "name" on _pebble._tcp.
 /// TXT record carries presence metadata (host pid/name/world) for friends lists.
-public final class NetListener {
+public final class NWNetListener: NetListener {
     private var listener: NWListener?
     public var onConnection: ((NetConnection) -> Void)?
     public private(set) var port: UInt16 = 0
@@ -120,7 +111,7 @@ public final class NetListener {
         l.service = NWListener.Service(name: serviceName, type: NET_SERVICE_TYPE,
                                        txtRecord: record.data)
         l.newConnectionHandler = { [weak self] nw in
-            let c = NetConnection(nw)
+            let c = NWNetConnection(nw)
             DispatchQueue.main.async {
                 self?.onConnection?(c)
                 c.start()
@@ -181,9 +172,9 @@ public final class NetBrowser {
 
 /// dial a discovered game (or a literal host:port for testing)
 public func netDial(_ endpoint: NWEndpoint) -> NetConnection {
-    NetConnection(NWConnection(to: endpoint, using: .tcp))
+    NWNetConnection(NWConnection(to: endpoint, using: .tcp))
 }
 public func netDial(host: String, port: UInt16) -> NetConnection {
-    NetConnection(NWConnection(host: NWEndpoint.Host(host),
-                               port: NWEndpoint.Port(rawValue: port) ?? 25585, using: .tcp))
+    NWNetConnection(NWConnection(host: NWEndpoint.Host(host),
+                                 port: NWEndpoint.Port(rawValue: port) ?? 25585, using: .tcp))
 }
