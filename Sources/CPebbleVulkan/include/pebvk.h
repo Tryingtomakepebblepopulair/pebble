@@ -22,6 +22,29 @@ void pb_vk_resize(int width, int height);
 
 void pb_vk_destroy(void);
 
+// upload the terrain atlas: straight RGBA8, `layers` slices of tileW×tileH
+// (the frozen ABI's texture2d_array). Call once after create.
+int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int layers);
+
+// upload one section mesh in the frozen 28-byte chunk stream
+// (docs/render-abi.md). pass: 0 opaque, 1 cutout, 2 translucent.
+// (ox,oy,oz) is the section's world-space origin. Re-uploading an id
+// replaces it; vertCount 0 removes it.
+int pb_vk_upload_section(unsigned long long id, int pass,
+                         double ox, double oy, double oz,
+                         const void* verts, int vertCount,
+                         const unsigned int* indices, int indexCount);
+void pb_vk_remove_section(unsigned long long id, int pass);
+void pb_vk_clear_sections(void);
+
+// camera + environment for the next frames; after the first call,
+// pb_vk_frame(r,g,b) clears to the sky AND draws every live section
+void pb_vk_set_camera(const float* viewProj16,
+                      double camX, double camY, double camZ,
+                      float time, float dayLight, float gammaB, float ambient,
+                      float fogStart, float fogEnd, float alphaTest,
+                      float fogR, float fogG, float fogB);
+
 // human-readable reason for the last failure (static buffer)
 const char* pb_vk_last_error(void);
 
