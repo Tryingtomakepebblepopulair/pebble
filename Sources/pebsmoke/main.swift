@@ -42,6 +42,8 @@ smokeFdlibmSuite()
 smokeEntitySuite()
 smokeSystemsSuite()
 smokePhysicsSuite()
+smokeRenderABISuite()
+smokeCodecSuite()
 smokeNetProtocolSuite()
 smokeSocketTransportSuite()
 

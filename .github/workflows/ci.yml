@@ -1,6 +1,6 @@
 # CI — PORTING modules 13/05/12: every push builds the full package on macOS
-# and runs the 530-check golden suite; Windows builds the portable core +
-# pebserver and runs the 496-check subset (pebsmokecore) against the SAME
+# and runs the 550-check golden suite; Windows builds the portable core +
+# pebserver and runs the 516-check subset (pebsmokecore) against the SAME
 # goldens — bit-identical worldgen AND a dedicated-server/guest e2e over
 # plain sockets, cross-platform. Both lanes use temp data roots.
 # PEBBLE_REGOLD is forbidden in CI: goldens are frozen.

@@ -20,12 +20,23 @@ let package = Package(
                 .define("SQLITE_ENABLE_API_ARMOR"),
             ]
         ),
+        // project-owned image/archive codecs: lodepng (zlib license) + miniz
+        // (MIT) — PNG and ZIP handling identical on every platform, replacing
+        // ImageIO/Compression in shared code (PORTING module 11)
+        .target(
+            name: "CCodecs",
+            path: "Sources/CCodecs",
+            cSettings: [
+                .define("LODEPNG_NO_COMPILE_DISK"),   // memory-only API
+                .define("MINIZ_NO_STDIO"),            // memory-only API
+            ]
+        ),
         // the portable deterministic core: simulation, worldgen, entities,
         // items, systems, registries, protocol/social value types. No Apple
         // frameworks — this target is the Windows-buildable slice (PORTING 01)
         .target(
             name: "PebbleCoreBase",
-            dependencies: ["CSQLite"],
+            dependencies: ["CSQLite", "CCodecs"],
             path: "Sources/PebbleCoreBase",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
