@@ -18,6 +18,17 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
+        // the shared smoke-test suites that need only the portable core —
+        // pebsmoke (macOS, full) and pebsmokecore (all platforms) both run
+        // these exact checks against the frozen goldens (PORTING 13)
+        .target(
+            name: "PebbleSmokeKit",
+            dependencies: ["PebbleCoreBase"],
+            path: "Sources/PebbleSmokeKit",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
         // the engine runtime: GameCore orchestration + Apple-backed services
         // (SQLite saves, Network.framework transport, simd render math).
         // Re-exports PebbleCoreBase so existing imports see the full surface
@@ -48,8 +59,16 @@ let package = Package(
         // headless smoke tests against the frozen golden baselines
         .executableTarget(
             name: "pebsmoke",
-            dependencies: ["PebbleCore"],
+            dependencies: ["PebbleCore", "PebbleSmokeKit"],
             path: "Sources/pebsmoke",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // the deterministic golden suite on the portable core alone — what
+        // Windows CI runs to prove worldgen is bit-identical cross-platform
+        .executableTarget(
+            name: "pebsmokecore",
+            dependencies: ["PebbleSmokeKit"],
+            path: "Sources/pebsmokecore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // dedicated LAN/SMP server: runs a world headless, no host player
