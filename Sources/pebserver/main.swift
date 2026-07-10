@@ -1,19 +1,33 @@
 // pebserver — a standalone Pebble world server (SMP-style). Runs a world
-// headless at 20 TPS with no host player: friends join over LAN (Bonjour)
-// or the internet (direct IP), and the world keeps running until you stop it.
+// headless at 20 TPS with no host player: friends join over LAN (Bonjour,
+// macOS) or the internet (direct IP, every platform), and the world keeps
+// running until you stop it. Portable: builds on macOS and Windows
+// (PORTING module 12).
 //
 //   pebserver                          list worlds and usage
 //   pebserver "My World"               serve an existing world (name or id)
 //   pebserver --create "SMP" [--seed x] [--creative]
 //   pebserver "My World" --port 25585
+//   pebserver ... --port 0             pick a free port (prints READY line)
+//   pebserver ... --data-dir <path>    keep worlds under a different folder
 //
 // Console commands while running: list, say <msg>, save, stop
 
 import Foundation
+import Dispatch
+#if canImport(PebbleCore)
 import PebbleCore
+#else
+import PebbleCoreBase
+#endif
+#if os(Windows)
+import WinSDK
+#endif
 
 setbuf(stdout, nil)
+#if canImport(PebbleCore)
 installAppleNetTransport()   // macOS servers advertise on Bonjour too
+#endif
 
 // ---- tiny arg parser --------------------------------------------------------
 let rawArgs = Array(CommandLine.arguments.dropFirst())
@@ -53,17 +67,17 @@ func log(_ s: String) {
     print("[\(stamp())] \(out)")
 }
 
-let game = GameCore()
 let port = UInt16(flags["--port"] ?? "") ?? 25585
 
-func usage(_ worlds: [WorldRecord]) {
+func usage(_ worlds: [WorldRecord]?) {
     print("""
     pebserver — standalone Pebble world server (Pebble \(PEBBLE_VERSION))
 
-      pebserver "<world name or id>" [--port \(port)]
+      pebserver "<world name or id>" [--port \(port)] [--data-dir <path>]
       pebserver --create "<name>" [--seed <seed>] [--creative] [--port \(port)]
 
     """)
+    guard let worlds else { return }
     if worlds.isEmpty {
         print("No worlds yet — create one with --create.")
     } else {
@@ -74,12 +88,21 @@ func usage(_ worlds: [WorldRecord]) {
     }
 }
 
-// ---- resolve the world ------------------------------------------------------
-var record: WorldRecord?
+// --help must not construct GameCore or touch storage (PORTING module 12)
 if switches.contains("--help") || switches.contains("-h") {
-    usage(game.listWorlds())
+    usage(nil)
     exit(0)
 }
+
+// the data root must be pinned BEFORE GameCore touches any store
+if let dataDir = flags["--data-dir"] {
+    vcOverrideDataDir(dataDir)
+}
+
+let game = GameCore()
+
+// ---- resolve the world ------------------------------------------------------
+var record: WorldRecord?
 if let createName = flags["--create"] {
     // create through the normal path (also seeds a spawn player slot for the
     // world's owner), then re-open it headless
@@ -109,7 +132,8 @@ guard let rec = record else {
 
 // ---- start ------------------------------------------------------------------
 do {
-    try game.enterWorldDedicated(rec, port: port)
+    // --port 0 means "pick a free port" (CI smokes use it)
+    try game.enterWorldDedicated(rec, port: port == 0 ? nil : port)
 } catch {
     print("error: couldn't listen on port \(port): \(error.localizedDescription)")
     exit(1)
@@ -117,8 +141,12 @@ do {
 game.netHost?.onLog = { line in log(line) }
 
 log("Pebble server \(PEBBLE_VERSION) — serving '\(rec.name)' (seed \(rec.seed))")
-log("Listening on port \(port) — LAN players see it under 'Join LAN Game';")
+#if canImport(PebbleCore)
+log("Listening on port \(port == 0 ? "…" : String(port)) — LAN players see it under 'Join LAN Game';")
 log("internet players add your address in Multiplayer → Servers.")
+#else
+log("Direct-IP server — players add your address in Multiplayer → Servers.")
+#endif
 log("Commands: list, say <message>, save, stop")
 
 // ---- clean shutdown ---------------------------------------------------------
@@ -128,6 +156,15 @@ func shutdown() {
     log("Goodbye.")
     exit(0)
 }
+#if os(Windows)
+// Ctrl-C / Ctrl-Break / console close — save on the game queue, not in the
+// handler (it runs on a system thread)
+_ = SetConsoleCtrlHandler({ _ in
+    DispatchQueue.main.async { shutdown() }
+    Sleep(10_000)   // hold the handler thread; exit(0) lands first
+    return true
+}, true)
+#else
 signal(SIGINT, SIG_IGN)
 signal(SIGTERM, SIG_IGN)
 let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
@@ -136,6 +173,7 @@ sigint.resume()
 let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 sigterm.setEventHandler { shutdown() }
 sigterm.resume()
+#endif
 
 // ---- console ------------------------------------------------------------------
 Thread.detachNewThread {
@@ -167,10 +205,13 @@ Thread.detachNewThread {
             }
         }
     }
+    // console EOF (stdin closed): keep serving — only an explicit stop,
+    // Ctrl-C, or SIGTERM shuts the world down (PORTING module 12)
 }
 
 // ---- 20 TPS loop ----------------------------------------------------------------
 var lastTick = monotonicNow()
+var announcedReady = false
 let timer = DispatchSource.makeTimerSource(queue: .main)
 timer.schedule(deadline: .now(), repeating: .milliseconds(50), leeway: .milliseconds(5))
 timer.setEventHandler {
@@ -178,7 +219,18 @@ timer.setEventHandler {
     let dt = (now - lastTick) * 1000
     lastTick = now
     _ = game.frame(dtMs: dt)
+    // one machine-readable line once the listener is up — smokes wait for it
+    if !announcedReady, let p = game.netHost?.port, p != 0 {
+        announcedReady = true
+        print("READY port=\(p) world=\(rec.id)")
+    }
 }
 timer.resume()
 
+// park the main thread and drain the main queue (ticks, net callbacks,
+// console commands, shutdown) — everything serializes there
+#if os(Windows)
+dispatchMain()
+#else
 RunLoop.main.run()
+#endif

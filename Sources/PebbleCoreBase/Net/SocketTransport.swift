@@ -107,12 +107,17 @@ public final class SocketConnection: NetConnection {
     private var parser = NetFrameParser()   // touched on `delivery` only
     /// dial target when created via socketDial (connect happens in start())
     private let dialTarget: (host: String, port: UInt16)?
+    /// sessions send (hello!) right after start(), before the dial thread
+    /// has connected — senders wait here like NWConnection's pre-ready buffer
+    private let ready = NSCondition()
+    private var isReady: Bool
 
     /// wrap an accepted socket
     init(fd: PebSocket, delivery: DispatchQueue) {
         self.fd = fd
         self.delivery = delivery
         dialTarget = nil
+        isReady = true
     }
 
     /// prepare an outgoing connection — start() resolves + connects
@@ -120,6 +125,21 @@ public final class SocketConnection: NetConnection {
         fd = PEB_BAD_SOCKET
         self.delivery = delivery
         dialTarget = (host, port)
+        isReady = false
+    }
+
+    /// unblock queued senders — connected, failed, or closed alike
+    private func markReady() {
+        ready.lock()
+        isReady = true
+        ready.broadcast()
+        ready.unlock()
+    }
+
+    private func waitReady() {
+        ready.lock()
+        while !isReady { ready.wait() }
+        ready.unlock()
     }
 
     public func start() {
@@ -131,11 +151,14 @@ public final class SocketConnection: NetConnection {
                     if closed {   // close() raced the connect
                         lock.unlock()
                         pebCloseSocket(sock)
+                        markReady()
                         return
                     }
                     fd = sock
                     lock.unlock()
+                    markReady()
                 case .failure(let err):
+                    markReady()
                     finish("connection failed: \(err.message)")
                     return
                 }
@@ -176,6 +199,7 @@ public final class SocketConnection: NetConnection {
         if closed { return }
         let frame = encodeNetFrame(msg)
         sendQueue.async { [self] in
+            waitReady()
             lock.lock()
             let sock = fd
             let isClosed = closed
@@ -201,6 +225,7 @@ public final class SocketConnection: NetConnection {
         closed = true
         let sock = fd
         lock.unlock()
+        markReady()   // drop, don't strand, senders queued behind the dial
         if sock != PEB_BAD_SOCKET {
             pebShutdown(sock)
             pebCloseSocket(sock)
@@ -221,6 +246,7 @@ public final class SocketConnection: NetConnection {
         closed = true
         let sock = fd
         lock.unlock()
+        markReady()
         if sock != PEB_BAD_SOCKET {
             pebShutdown(sock)
             pebCloseSocket(sock)

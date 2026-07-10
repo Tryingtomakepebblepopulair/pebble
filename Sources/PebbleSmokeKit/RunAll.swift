@@ -19,5 +19,7 @@ public func runPortableSmokeSuites() {
     smokeSystemsSuite()
     smokePhysicsSuite()
     smokeNetProtocolSuite()
+    smokeSocketTransportSuite()
     smokeSocialSuite()
+    smokePortableServerSuite()
 }

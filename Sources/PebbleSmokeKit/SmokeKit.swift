@@ -41,6 +41,7 @@ public func smokeSetenv(_ key: String, _ value: String) {
 // settings, social, skins) works under a throwaway temp dir — smoke runs
 // must never touch real user data (PORTING modules 04/13).
 public func smokeBootstrapDataRoot() {
+    setbuf(stdout, nil)   // keep ✓/✗ lines honest next to stderr (crash logs, CI)
     if getenv("PEBBLE_DATA_DIR") == nil {
         let root = NSTemporaryDirectory() + "pebsmoke-\(ProcessInfo.processInfo.processIdentifier)"
         smokeSetenv("PEBBLE_DATA_DIR", root)

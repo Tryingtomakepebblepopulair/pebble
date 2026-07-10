@@ -43,6 +43,7 @@ smokeEntitySuite()
 smokeSystemsSuite()
 smokePhysicsSuite()
 smokeNetProtocolSuite()
+smokeSocketTransportSuite()
 
 // ---------------------------------------------------------------------------
 section("LAN multiplayer (host + guest cores over localhost TCP)")
@@ -265,6 +266,8 @@ do {
         SocialStore.shared.removeRecent(id: r.id)
     }
 }
+
+smokePortableServerSuite()
 
 print("\n\(passed) passed, \(failed) failed")
 exit(failed > 0 ? 1 : 0)

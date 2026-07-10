@@ -1,7 +1,8 @@
-# CI — PORTING module 13: every push builds the full package on macOS and
-# runs the 512-check golden suite; Windows builds the portable core and runs
-# the 478-check deterministic subset (pebsmokecore) against the SAME goldens,
-# proving cross-platform bit-identical worldgen. Both use temp data roots.
+# CI — PORTING modules 13/05/12: every push builds the full package on macOS
+# and runs the 530-check golden suite; Windows builds the portable core +
+# pebserver and runs the 496-check subset (pebsmokecore) against the SAME
+# goldens — bit-identical worldgen AND a dedicated-server/guest e2e over
+# plain sockets, cross-platform. Both lanes use temp data roots.
 # PEBBLE_REGOLD is forbidden in CI: goldens are frozen.
 name: CI
 on:
@@ -60,6 +61,11 @@ jobs:
         env:
           PEBBLE_DATA_DIR: ${{ runner.temp }}\pebble-data
           PEBBLE_GOLDENS_DIR: ${{ github.workspace }}\goldens
+      - name: Build the dedicated server (release)
+        run: swift build -c release --product pebserver
+      # --help must exit 0 without touching storage (PORTING module 12)
+      - name: pebserver smoke
+        run: .\.build\release\pebserver.exe --help
       - name: Goldens unmodified
         shell: bash
         run: git diff --exit-code goldens/

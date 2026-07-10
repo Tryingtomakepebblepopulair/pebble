@@ -4,6 +4,19 @@
 // and saved configs stay engine-compatible.
 
 import Foundation
+#if os(Windows)
+import CRT
+#endif
+
+/// point the data root somewhere else BEFORE any store is touched —
+/// `pebserver --data-dir` and tests use this (PORTING module 04)
+public func vcOverrideDataDir(_ path: String) {
+    #if os(Windows)
+    _ = _putenv_s("PEBBLE_DATA_DIR", path)
+    #else
+    setenv("PEBBLE_DATA_DIR", path, 1)
+    #endif
+}
 
 public struct Settings: Codable {
     // video

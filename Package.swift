@@ -84,10 +84,15 @@ let package = Package(
             path: "Sources/pebsmokecore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        // dedicated LAN/SMP server: runs a world headless, no host player
+        // dedicated LAN/SMP server: runs a world headless, no host player.
+        // Portable — on macOS it links the Apple adapter for Bonjour, on
+        // Windows it serves direct-IP over the socket transport (PORTING 12)
         .executableTarget(
             name: "pebserver",
-            dependencies: ["PebbleCore"],
+            dependencies: [
+                "PebbleCoreBase",
+                .target(name: "PebbleCore", condition: .when(platforms: [.macOS])),
+            ],
             path: "Sources/pebserver",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
