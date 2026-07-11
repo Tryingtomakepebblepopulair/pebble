@@ -77,7 +77,7 @@ jobs:
           Copy-Item .build\release\PebbleWin.exe stage\Pebble.exe
           $core = (& where.exe swiftCore.dll | Select-Object -First 1)
           Copy-Item (Join-Path (Split-Path -Parent $core) '*.dll') stage\
-          Set-Content -Path stage\LEES-MIJ.txt -Value "Pebble Windows demo`r`n1. Dubbelklik Pebble.exe`r`n2. Goed = een venster waarvan de lucht langzaam kleurt (dag/nacht in 60 sec)`r`n3. Stuur pebble-log.txt (verschijnt naast Pebble.exe) en een screenshot terug"
+          Set-Content -Path stage\LEES-MIJ.txt -Value "PEBBLE voor Windows (testversie — nog zonder geluid)`r`n`r`nSTARTEN: dubbelklik Pebble.exe`r`n- Kies je naam en 'Speel alleen', of vul het IP van een vriend in en 'Join wereld'`r`n- (Mac-host: open je wereld daar met Open to LAN, het IP staat in dat scherm)`r`n`r`nBESTURING:`r`n- klik in het venster = muis vangen, Esc = muis loslaten`r`n- WASD lopen, spatie springen, shift sluipen, ctrl sprinten`r`n- links slopen, rechts bouwen, 1-9 hotbar, Q weggooien`r`n`r`nSKIN: leg een skin.png (64x64) in de map PebbleData, dan zien vrienden jouw skin`r`n`r`nPROBLEEM? Stuur pebble-log.txt (naast Pebble.exe) + een screenshot (Win+Shift+S)"
       - uses: actions/upload-artifact@v4
         with:
           name: pebble-windows-demo

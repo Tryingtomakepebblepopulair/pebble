@@ -47,6 +47,7 @@ var joinTarget: (host: String, port: UInt16)? = nil
 var playerName = "Speler"
 var seedText = ""
 var forceNew = false
+var skipLobby = false
 do {
     let args = Array(CommandLine.arguments.dropFirst())
     var i = 0
@@ -64,6 +65,8 @@ do {
             i += 1
         case "--new":
             forceNew = true
+        case "--solo":
+            skipLobby = true
         default: break
         }
         i += 1
@@ -74,6 +77,25 @@ do {
 if getenv("PEBBLE_DATA_DIR") == nil {
     let root = FileManager.default.currentDirectoryPath + "\\PebbleData"
     vcOverrideDataDir(root)
+}
+
+// ---- lobby ----------------------------------------------------------------------
+if joinTarget == nil && !skipLobby && !forceNew {
+    var prefs = loadClientPrefs()
+    if playerName == "Speler" { playerName = prefs.name }
+    let (choice, chosenName) = runLobby(defaultName: playerName, defaultServer: prefs.server)
+    playerName = chosenName
+    switch choice {
+    case .quit:
+        exit(0)
+    case .single:
+        break
+    case .join(let h, let prt):
+        joinTarget = (h, prt)
+        prefs.server = prt == 25585 ? h : "\(h):\(prt)"
+    }
+    prefs.name = playerName
+    saveClientPrefs(prefs)
 }
 
 // ---- window + input -------------------------------------------------------------
@@ -209,7 +231,7 @@ plog("atlas: \(atlas.count) tiles — data root: \(vcSupportDir().path)")
 if let target = joinTarget {
     plog("joining \(target.host):\(target.port) as \(playerName)…")
     _ = game.joinLan(socketDial(host: target.host, port: target.port),
-                     name: playerName, skin: Data())
+                     name: playerName, skin: loadSkinBlob())
     var waited = 0
     while !game.hasWorld() && waited < 900 {   // ~15s
         _ = game.frame(dtMs: 16)
