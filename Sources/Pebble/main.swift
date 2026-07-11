@@ -392,6 +392,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
         let parts = v.components(separatedBy: "@")
         return (parts[0], parts.count > 1 ? Int(parts[1]) ?? 240 : 240)
     }()
+    // test hook: PEBBLE_UISHOT="/tmp/x.png@90" captures the FULL frame
+    // (title/world + UI overlay) after N frames — the module 08 UI baseline
+    private var pendingUIShot: (path: String, frames: Int)? = {
+        guard let v = ProcessInfo.processInfo.environment["PEBBLE_UISHOT"] else { return nil }
+        let parts = v.components(separatedBy: "@")
+        return (parts[0], parts.count > 1 ? Int(parts[1]) ?? 90 : 90)
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         gAppDelegate = self
@@ -423,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
         gameView.preferredFramesPerSecond = 120
         // capture hooks blit from the drawable, which framebufferOnly forbids
         let env = ProcessInfo.processInfo.environment
-        if env["PEBBLE_SHOT"] != nil || env["PEBBLE_PHOTOBOOTH"] != nil {
+        if env["PEBBLE_SHOT"] != nil || env["PEBBLE_PHOTOBOOTH"] != nil || env["PEBBLE_UISHOT"] != nil {
             gameView.framebufferOnly = false
         }
         window.contentView = gameView
@@ -664,6 +671,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
         uiMetal.flush(ui.cv, enc, pipeline: renderer.uiPipeline)
 
         enc.endEncoding()
+
+        if let uiShot = pendingUIShot {
+            pendingUIShot = (uiShot.path, uiShot.frames - 1)
+            if uiShot.frames <= 0 {
+                pendingUIShot = nil
+                let tex = drawable.texture
+                cmd.addCompletedHandler { _ in
+                    let w = tex.width, h = tex.height
+                    var bgra = [UInt8](repeating: 0, count: w * h * 4)
+                    bgra.withUnsafeMutableBytes { raw in
+                        tex.getBytes(raw.baseAddress!, bytesPerRow: w * 4,
+                                     from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+                    }
+                    for i in stride(from: 0, to: bgra.count, by: 4) { bgra.swapAt(i, i + 2) }
+                    if let png = pebEncodePNG(bgra, width: w, height: h) {
+                        try? png.write(to: URL(fileURLWithPath: uiShot.path))
+                        print("[uishot] captured \(uiShot.path)")
+                        fflush(stdout)
+                    }
+                    DispatchQueue.main.async { NSApp.terminate(nil) }
+                }
+            }
+        }
+
         cmd.present(drawable)
         cmd.commit()
     }
