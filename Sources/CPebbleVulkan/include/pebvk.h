@@ -37,6 +37,16 @@ int pb_vk_upload_section(unsigned long long id, int pass,
 void pb_vk_remove_section(unsigned long long id, int pass);
 void pb_vk_clear_sections(void);
 
+// register one entity type's bind-pose geometry (36-byte ABI stream,
+// non-indexed) + its skin texture. Static per type; first upload wins.
+int pb_vk_upload_entity_geom(int geomId, const void* verts, int vertCount,
+                             const unsigned char* rgba, int texW, int texH);
+
+// rebuild the per-frame entity draw list (call once, then push visible ones)
+void pb_vk_begin_entities(void);
+// model16 is column-major, camera-relative translation; mvp is computed here
+void pb_vk_push_entity(int geomId, const float* model16, float brightness, float alpha);
+
 // camera + environment for the next frames; after the first call,
 // pb_vk_frame(r,g,b) clears to the sky AND draws every live section
 void pb_vk_set_camera(const float* viewProj16,

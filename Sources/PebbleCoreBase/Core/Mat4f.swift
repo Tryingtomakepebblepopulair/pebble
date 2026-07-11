@@ -63,6 +63,15 @@ public func mat4fLookDir(eyeX: Float, eyeY: Float, eyeZ: Float,
     ])
 }
 
+public func mat4fTranslation(_ x: Float, _ y: Float, _ z: Float) -> Mat4f {
+    Mat4f([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1])
+}
+
+public func mat4fRotateY(_ angle: Float) -> Mat4f {
+    let c = Float(detCos(Double(angle))), s = Float(detSin(Double(angle)))
+    return Mat4f([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1])
+}
+
 @inline(__always) private func tanf32(_ x: Float) -> Float {
     Float(_tan(Double(x)))
 }

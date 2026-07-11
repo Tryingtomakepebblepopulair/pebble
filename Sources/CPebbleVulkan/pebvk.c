@@ -101,6 +101,7 @@ D_FN(vkCmdBindIndexBuffer)
 D_FN(vkCmdBindDescriptorSets)
 D_FN(vkCmdPushConstants)
 D_FN(vkCmdDrawIndexed)
+D_FN(vkCmdDraw)
 D_FN(vkCmdSetViewport)
 D_FN(vkCmdSetScissor)
 D_FN(vkCmdPipelineBarrier)
@@ -173,6 +174,43 @@ typedef struct {
     float fog[4];
     float fogColor[4];
 } PbPush;
+
+// entities: bind-pose geometry per type + one skin texture each
+#define MAX_ENTITY_GEOMS 160
+#define MAX_ENTITY_DRAWS 512
+typedef struct {
+    int used;
+    VkBuffer vbuf;
+    VkDeviceMemory vmem;
+    uint32_t vertCount;
+    VkImage tex;
+    VkDeviceMemory texMem;
+    VkImageView texView;
+    VkDescriptorSet set;
+} PbEntityGeom;
+static PbEntityGeom g_entGeoms[MAX_ENTITY_GEOMS];
+typedef struct {
+    float mvp[16];
+    float light[4];
+} PbEntityPush;
+typedef struct {
+    int geomId;
+    PbEntityPush push;
+} PbEntityDraw;
+static PbEntityDraw g_entDraws[MAX_ENTITY_DRAWS];
+static int g_entDrawCount;
+static VkPipeline g_pipeEntity;
+static VkPipelineLayout g_entLayout;
+
+static void mat4_mul(float* out, const float* a, const float* b) {
+    for (int c = 0; c < 4; c++) {
+        for (int r = 0; r < 4; r++) {
+            float s = 0;
+            for (int k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+            out[c * 4 + r] = s;
+        }
+    }
+}
 
 static uint32_t find_mem_type(uint32_t bits, VkMemoryPropertyFlags props) {
     VkPhysicalDeviceMemoryProperties mp;
@@ -466,6 +504,7 @@ int pb_vk_create(void* hwnd, void* hinstance, int width, int height) {
     LOAD_D(vkCmdBindDescriptorSets);
     LOAD_D(vkCmdPushConstants);
     LOAD_D(vkCmdDrawIndexed);
+    LOAD_D(vkCmdDraw);
     LOAD_D(vkCmdSetViewport);
     LOAD_D(vkCmdSetScissor);
     LOAD_D(vkCmdPipelineBarrier);
@@ -660,6 +699,61 @@ int pb_vk_create(void* hwnd, void* hinstance, int width, int height) {
     vkDestroyShaderModule(g_device, vs, NULL);
     vkDestroyShaderModule(g_device, fs, NULL);
 
+    // shared sampler + descriptor pool (terrain atlas + up to 159 skins)
+    VkSamplerCreateInfo sci = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    sci.magFilter = VK_FILTER_NEAREST;
+    sci.minFilter = VK_FILTER_NEAREST;
+    sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;   // fluid UVs scroll past 1
+    sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    VKTRY(vkCreateSampler(g_device, &sci, NULL, &g_atlasSampler), "create sampler");
+    VkDescriptorPoolSize pool = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_ENTITY_GEOMS + 1 };
+    VkDescriptorPoolCreateInfo dpi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    dpi.maxSets = MAX_ENTITY_GEOMS + 1;
+    dpi.poolSizeCount = 1;
+    dpi.pPoolSizes = &pool;
+    VKTRY(vkCreateDescriptorPool(g_device, &dpi, NULL, &g_descPool), "create descriptor pool");
+
+    // entity pipeline: 36-byte ABI stream, blended, depth-tested
+    VkPushConstantRange epcr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                 0, sizeof(PbEntityPush) };
+    VkPipelineLayoutCreateInfo epli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    epli.setLayoutCount = 1;
+    epli.pSetLayouts = &g_setLayout;
+    epli.pushConstantRangeCount = 1;
+    epli.pPushConstantRanges = &epcr;
+    VKTRY(vkCreatePipelineLayout(g_device, &epli, NULL, &g_entLayout), "create entity layout");
+    VkShaderModuleCreateInfo esv = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    esv.codeSize = g_entity_vert_spv_size;
+    esv.pCode = g_entity_vert_spv;
+    VkShaderModule evs;
+    VKTRY(vkCreateShaderModule(g_device, &esv, NULL, &evs), "create entity vs");
+    VkShaderModuleCreateInfo esf = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    esf.codeSize = g_entity_frag_spv_size;
+    esf.pCode = g_entity_frag_spv;
+    VkShaderModule efs;
+    VKTRY(vkCreateShaderModule(g_device, &esf, NULL, &efs), "create entity fs");
+    stages[0].module = evs;
+    stages[1].module = efs;
+    VkVertexInputBindingDescription ebind = { 0, 36, VK_VERTEX_INPUT_RATE_VERTEX };
+    VkVertexInputAttributeDescription eattrs[4] = {
+        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 },
+        { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, 12 },
+        { 2, 0, VK_FORMAT_R32G32_SFLOAT, 24 },
+        { 3, 0, VK_FORMAT_R32_SFLOAT, 32 },
+    };
+    vin.pVertexBindingDescriptions = &ebind;
+    vin.vertexAttributeDescriptionCount = 4;
+    vin.pVertexAttributeDescriptions = eattrs;
+    cba.blendEnable = VK_TRUE;   // still set from the translucent pipeline
+    ds.depthWriteEnable = VK_TRUE;
+    gpi.layout = g_entLayout;
+    VKTRY(vkCreateGraphicsPipelines(g_device, VK_NULL_HANDLE, 1, &gpi, NULL, &g_pipeEntity),
+          "create entity pipeline");
+    vkDestroyShaderModule(g_device, evs, NULL);
+    vkDestroyShaderModule(g_device, efs, NULL);
+
     if (!g_sectionsInit) {
         for (int i = 0; i < MAX_SECTIONS; i++) g_sections[i].pass = -1;
         g_sectionsInit = 1;
@@ -679,10 +773,11 @@ void pb_vk_resize(int width, int height) {
 
 // ---- world data: atlas + sections ------------------------------------------
 
-int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int layers) {
-    if (!g_device) FAIL("renderer not created");
-    VkDeviceSize total = (VkDeviceSize)tileW * tileH * 4 * layers;
-
+/// staging upload of straight RGBA8 into a fresh sampled image (+view)
+static int upload_texture(const unsigned char* rgba, int w, int h, int layers,
+                          VkImageViewType viewType,
+                          VkImage* outImg, VkDeviceMemory* outMem, VkImageView* outView) {
+    VkDeviceSize total = (VkDeviceSize)w * h * 4 * layers;
     VkBuffer staging;
     VkDeviceMemory stagingMem;
     if (make_buffer(total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &staging, &stagingMem, rgba) != 0)
@@ -691,8 +786,8 @@ int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int laye
     VkImageCreateInfo ici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     ici.imageType = VK_IMAGE_TYPE_2D;
     ici.format = VK_FORMAT_R8G8B8A8_UNORM;
-    ici.extent.width = (uint32_t)tileW;
-    ici.extent.height = (uint32_t)tileH;
+    ici.extent.width = (uint32_t)w;
+    ici.extent.height = (uint32_t)h;
     ici.extent.depth = 1;
     ici.mipLevels = 1;
     ici.arrayLayers = (uint32_t)layers;
@@ -700,19 +795,20 @@ int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int laye
     ici.tiling = VK_IMAGE_TILING_OPTIMAL;
     ici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VKTRY(vkCreateImage(g_device, &ici, NULL, &g_atlasImage), "create atlas image");
+    VKTRY(vkCreateImage(g_device, &ici, NULL, outImg), "create texture image");
     VkMemoryRequirements req;
-    vkGetImageMemoryRequirements(g_device, g_atlasImage, &req);
+    vkGetImageMemoryRequirements(g_device, *outImg, &req);
     VkMemoryAllocateInfo mai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     mai.allocationSize = req.size;
     mai.memoryTypeIndex = find_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (mai.memoryTypeIndex == UINT32_MAX) FAIL("no device-local memory for atlas");
-    VKTRY(vkAllocateMemory(g_device, &mai, NULL, &g_atlasMem), "allocate atlas memory");
-    VKTRY(vkBindImageMemory(g_device, g_atlasImage, g_atlasMem, 0), "bind atlas memory");
+    if (mai.memoryTypeIndex == UINT32_MAX) FAIL("no device-local memory for texture");
+    VKTRY(vkAllocateMemory(g_device, &mai, NULL, outMem), "allocate texture memory");
+    VKTRY(vkBindImageMemory(g_device, *outImg, *outMem, 0), "bind texture memory");
 
-    // one-shot upload: UNDEFINED → TRANSFER_DST → copy → SHADER_READ_ONLY
+    // one-shot: UNDEFINED → TRANSFER_DST → copy → SHADER_READ_ONLY
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkQueueWaitIdle(g_queue);
     vkResetCommandBuffer(g_cmd[0], 0);
     vkBeginCommandBuffer(g_cmd[0], &bi);
     VkImageMemoryBarrier bar = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -722,7 +818,7 @@ int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int laye
     bar.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     bar.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     bar.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bar.image = g_atlasImage;
+    bar.image = *outImg;
     bar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     bar.subresourceRange.levelCount = 1;
     bar.subresourceRange.layerCount = (uint32_t)layers;
@@ -731,10 +827,10 @@ int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int laye
     VkBufferImageCopy copy = { 0 };
     copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     copy.imageSubresource.layerCount = (uint32_t)layers;
-    copy.imageExtent.width = (uint32_t)tileW;
-    copy.imageExtent.height = (uint32_t)tileH;
+    copy.imageExtent.width = (uint32_t)w;
+    copy.imageExtent.height = (uint32_t)h;
     copy.imageExtent.depth = 1;
-    vkCmdCopyBufferToImage(g_cmd[0], staging, g_atlasImage,
+    vkCmdCopyBufferToImage(g_cmd[0], staging, *outImg,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
     bar.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     bar.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -746,49 +842,76 @@ int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int laye
     VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
     si.commandBufferCount = 1;
     si.pCommandBuffers = &g_cmd[0];
-    VKTRY(vkQueueSubmit(g_queue, 1, &si, VK_NULL_HANDLE), "submit atlas upload");
+    VKTRY(vkQueueSubmit(g_queue, 1, &si, VK_NULL_HANDLE), "submit texture upload");
     vkQueueWaitIdle(g_queue);
     vkDestroyBuffer(g_device, staging, NULL);
     vkFreeMemory(g_device, stagingMem, NULL);
 
     VkImageViewCreateInfo vci = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    vci.image = g_atlasImage;
-    vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    vci.image = *outImg;
+    vci.viewType = viewType;
     vci.format = VK_FORMAT_R8G8B8A8_UNORM;
     vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     vci.subresourceRange.levelCount = 1;
     vci.subresourceRange.layerCount = (uint32_t)layers;
-    VKTRY(vkCreateImageView(g_device, &vci, NULL, &g_atlasView), "create atlas view");
+    VKTRY(vkCreateImageView(g_device, &vci, NULL, outView), "create texture view");
+    return 0;
+}
 
-    VkSamplerCreateInfo sci = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-    sci.magFilter = VK_FILTER_NEAREST;   // blocky pixels, like the Metal path
-    sci.minFilter = VK_FILTER_NEAREST;
-    sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;   // fluid UVs scroll past 1
-    sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    VKTRY(vkCreateSampler(g_device, &sci, NULL, &g_atlasSampler), "create atlas sampler");
-
-    VkDescriptorPoolSize pool = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 };
-    VkDescriptorPoolCreateInfo dpi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    dpi.maxSets = 1;
-    dpi.poolSizeCount = 1;
-    dpi.pPoolSizes = &pool;
-    VKTRY(vkCreateDescriptorPool(g_device, &dpi, NULL, &g_descPool), "create descriptor pool");
+static int make_sampler_set(VkImageView view, VkDescriptorSet* outSet) {
     VkDescriptorSetAllocateInfo dsa = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
     dsa.descriptorPool = g_descPool;
     dsa.descriptorSetCount = 1;
     dsa.pSetLayouts = &g_setLayout;
-    VKTRY(vkAllocateDescriptorSets(g_device, &dsa, &g_atlasSet), "allocate descriptor set");
-    VkDescriptorImageInfo dii = { g_atlasSampler, g_atlasView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VKTRY(vkAllocateDescriptorSets(g_device, &dsa, outSet), "allocate descriptor set");
+    VkDescriptorImageInfo dii = { g_atlasSampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
     VkWriteDescriptorSet wds = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    wds.dstSet = g_atlasSet;
+    wds.dstSet = *outSet;
     wds.dstBinding = 0;
     wds.descriptorCount = 1;
     wds.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     wds.pImageInfo = &dii;
     vkUpdateDescriptorSets(g_device, 1, &wds, 0, NULL);
     return 0;
+}
+
+int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int layers) {
+    if (!g_device) FAIL("renderer not created");
+    if (upload_texture(rgba, tileW, tileH, layers, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                       &g_atlasImage, &g_atlasMem, &g_atlasView) != 0) return -1;
+    return make_sampler_set(g_atlasView, &g_atlasSet);
+}
+
+int pb_vk_upload_entity_geom(int geomId, const void* verts, int vertCount,
+                             const unsigned char* rgba, int texW, int texH) {
+    if (!g_device) FAIL("renderer not created");
+    if (geomId < 0 || geomId >= MAX_ENTITY_GEOMS) FAIL("entity geom id out of range");
+    PbEntityGeom* gm = &g_entGeoms[geomId];
+    if (gm->used) return 0;   // types are static — first upload wins
+    if (make_buffer((VkDeviceSize)vertCount * 36, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    &gm->vbuf, &gm->vmem, verts) != 0) return -1;
+    gm->vertCount = (uint32_t)vertCount;
+    if (upload_texture(rgba, texW, texH, 1, VK_IMAGE_VIEW_TYPE_2D,
+                       &gm->tex, &gm->texMem, &gm->texView) != 0) return -1;
+    if (make_sampler_set(gm->texView, &gm->set) != 0) return -1;
+    gm->used = 1;
+    return 0;
+}
+
+void pb_vk_begin_entities(void) {
+    g_entDrawCount = 0;
+}
+
+void pb_vk_push_entity(int geomId, const float* model16, float brightness, float alpha) {
+    if (geomId < 0 || geomId >= MAX_ENTITY_GEOMS || !g_entGeoms[geomId].used) return;
+    if (g_entDrawCount >= MAX_ENTITY_DRAWS) return;
+    PbEntityDraw* d = &g_entDraws[g_entDrawCount++];
+    d->geomId = geomId;
+    mat4_mul(d->push.mvp, g_push.viewProj, model16);
+    d->push.light[0] = brightness;
+    d->push.light[1] = 0;
+    d->push.light[2] = 0;
+    d->push.light[3] = alpha;
 }
 
 static PbSection* find_section(uint64_t id, int pass) {
@@ -903,6 +1026,28 @@ static void record_world_draws(VkCommandBuffer cmd) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipeOpaque);
     draw_pass(cmd, 0, 0.0f);              // opaque
     draw_pass(cmd, 1, g_cutoutAlphaTest); // cutout (leaves/plants) — discard
+    if (g_entDrawCount > 0) {             // mobs + other players
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipeEntity);
+        int lastGeom = -1;
+        for (int i = 0; i < g_entDrawCount; i++) {
+            PbEntityDraw* d = &g_entDraws[i];
+            PbEntityGeom* gm = &g_entGeoms[d->geomId];
+            if (d->geomId != lastGeom) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_entLayout,
+                                        0, 1, &gm->set, 0, NULL);
+                VkDeviceSize zero = 0;
+                vkCmdBindVertexBuffers(cmd, 0, 1, &gm->vbuf, &zero);
+                lastGeom = d->geomId;
+            }
+            vkCmdPushConstants(cmd, g_entLayout,
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof d->push, &d->push);
+            vkCmdDraw(cmd, gm->vertCount, 1, 0, 0);
+        }
+        // rebind the terrain set for the translucent pass
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipeLayout,
+                                0, 1, &g_atlasSet, 0, NULL);
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipeTranslucent);
     draw_pass(cmd, 2, 0.0f);              // water/glass — blended
 }
@@ -990,6 +1135,18 @@ void pb_vk_destroy(void) {
                 s->pass = -1;
             }
         }
+        for (int i = 0; i < MAX_ENTITY_GEOMS; i++) {
+            PbEntityGeom* gm = &g_entGeoms[i];
+            if (!gm->used) continue;
+            if (gm->vbuf) vkDestroyBuffer(g_device, gm->vbuf, NULL);
+            if (gm->vmem) vkFreeMemory(g_device, gm->vmem, NULL);
+            if (gm->texView) vkDestroyImageView(g_device, gm->texView, NULL);
+            if (gm->tex) vkDestroyImage(g_device, gm->tex, NULL);
+            if (gm->texMem) vkFreeMemory(g_device, gm->texMem, NULL);
+            gm->used = 0;
+        }
+        if (g_pipeEntity) vkDestroyPipeline(g_device, g_pipeEntity, NULL);
+        if (g_entLayout) vkDestroyPipelineLayout(g_device, g_entLayout, NULL);
         if (g_descPool) vkDestroyDescriptorPool(g_device, g_descPool, NULL);
         if (g_atlasSampler) vkDestroySampler(g_device, g_atlasSampler, NULL);
         if (g_atlasView) vkDestroyImageView(g_device, g_atlasView, NULL);
@@ -1040,6 +1197,14 @@ int pb_vk_upload_section(unsigned long long id, int pass,
 }
 void pb_vk_remove_section(unsigned long long id, int pass) { (void)id; (void)pass; }
 void pb_vk_clear_sections(void) {}
+int pb_vk_upload_entity_geom(int geomId, const void* verts, int vertCount,
+                             const unsigned char* rgba, int texW, int texH) {
+    (void)geomId; (void)verts; (void)vertCount; (void)rgba; (void)texW; (void)texH; return -1;
+}
+void pb_vk_begin_entities(void) {}
+void pb_vk_push_entity(int geomId, const float* model16, float brightness, float alpha) {
+    (void)geomId; (void)model16; (void)brightness; (void)alpha;
+}
 void pb_vk_set_camera(const float* viewProj16,
                       double camX, double camY, double camZ,
                       float time, float dayLight, float gammaB, float ambient,

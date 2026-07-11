@@ -214,6 +214,7 @@ let game = GameCore()
 gGame = game
 let host = WinHost()
 game.host = host
+let entityView = EntityView()
 if !playerName.isEmpty { game.settings.playerName = playerName }
 
 // procedural atlas (the same tiles the atlas goldens pin)
@@ -351,8 +352,11 @@ mainLoop: while true {
                              fogEnd * 0.65, fogEnd, 0.35,
                              hor.0, hor.1, hor.2)
         }
+        entityView.frame(game: game, camX: xi, camY: eyeY, camZ: zi,
+                         dayLight: dayLight, partial: partial)
         _ = pb_vk_frame(zen.0, zen.1, zen.2)
     } else {
+        pb_vk_begin_entities()
         _ = pb_vk_frame(0.25, 0.4, 0.7)   // streaming in — plain sky
     }
 
