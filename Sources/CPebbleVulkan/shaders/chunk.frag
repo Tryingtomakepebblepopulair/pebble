@@ -39,6 +39,8 @@ void main() {
 
     vec3 col = tex.rgb * vColor;
     float alpha = tex.a * pc.fog.w;
+    // water reads too thin without the Metal path's fresnel — thicken it
+    if (vAnim == 1u) { alpha = min(1.0, alpha * 1.4); }
 
     float fogStart = pc.fog.x, fogEnd = pc.fog.y;
     float fog = clamp((vFogDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
