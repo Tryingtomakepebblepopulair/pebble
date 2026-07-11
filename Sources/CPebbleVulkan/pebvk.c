@@ -275,6 +275,8 @@ static int make_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
     return 0;
 }
 
+static int make_sampler_set(VkImageView view, VkDescriptorSet* outSet);
+
 // ---- swapchain (re)build ----------------------------------------------------
 static void destroy_swapchain(void) {
     for (uint32_t i = 0; i < g_imageCount; i++) {
