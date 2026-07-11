@@ -202,6 +202,12 @@ static int g_entDrawCount;
 static VkPipeline g_pipeEntity;
 static VkPipelineLayout g_entLayout;
 
+// camera for the next frame (set per frame from Swift)
+static PbPush g_push;      // viewProj/light/fog shared; origin per section
+static double g_camX, g_camY, g_camZ;
+static float g_cutoutAlphaTest;
+static int g_worldDraws;   // 0 = sky-only clear (bootstrap mode)
+
 static void mat4_mul(float* out, const float* a, const float* b) {
     for (int c = 0; c < 4; c++) {
         for (int r = 0; r < 4; r++) {
@@ -965,12 +971,6 @@ void pb_vk_clear_sections(void) {
         if (g_sections[i].pass != -1) free_section(&g_sections[i]);
     }
 }
-
-// camera for the next frame (set per frame from Swift)
-static PbPush g_push;      // viewProj/light/fog shared; origin per section
-static double g_camX, g_camY, g_camZ;
-static float g_cutoutAlphaTest;
-static int g_worldDraws;   // 0 = sky-only clear (bootstrap mode)
 
 void pb_vk_set_camera(const float* viewProj16,
                       double camX, double camY, double camZ,

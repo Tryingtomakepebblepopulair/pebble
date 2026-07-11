@@ -370,6 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
     let host = HostBridge()
     var game: GameCore!
     var ui: UIManager!
+    var uiMetal: UICanvasMetal!
     let hud = HUD()
     let audio = AudioEngineM()
     private var lastFrame = CACurrentMediaTime()
@@ -405,7 +406,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
         guard let device = MTLCreateSystemDefaultDevice() else { fatalError("no Metal device") }
         let t1 = CFAbsoluteTimeGetCurrent()
         renderer = WorldRenderer(device: device)
-        ui = UIManager(cv: UICanvas(device: device))
+        ui = UIManager(cv: UICanvas())
+        uiMetal = UICanvasMetal(device: device)
         print(String(format: "renderer: %.0fms (atlas + pipelines)", (CFAbsoluteTimeGetCurrent() - t1) * 1000))
 
         let rect = NSRect(x: 0, y: 0, width: 1440, height: 810)
@@ -659,7 +661,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
         }
         screen?.draw(ui, game, 0)
         ui.endFrame()
-        ui.cv.flush(enc, pipeline: renderer.uiPipeline)
+        uiMetal.flush(ui.cv, enc, pipeline: renderer.uiPipeline)
 
         enc.endEncoding()
         cmd.present(drawable)

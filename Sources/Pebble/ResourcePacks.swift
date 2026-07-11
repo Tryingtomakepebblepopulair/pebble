@@ -853,7 +853,8 @@ func applyResourcePacks(_ userPacks: [String], game: GameCore, renderer: WorldRe
         renderer.moonTex = packEntityImage(["environment/moon_phases.png"]).flatMap { renderer.makeImageTexture($0) }
         let pui = PackUI(packs: packs, device: renderer.device)
         ui.packUI = pui
-        ui.cv.guiTexture = pui?.texture
+        gAppDelegate?.uiMetal.guiTexture = pui?.texture
+        ui.cv.hasGuiSheet = pui?.texture != nil
         packFontWidths = pui?.fontWidths
         print(String(format: "[packs] %@ → %d/%d tiles, %d item icons, %d animated, %d× atlas, %d GUI sheets (%.0fms)",
                      enabled.joined(separator: " + "), result.appliedTiles, result.slices.count,
@@ -867,7 +868,8 @@ func applyResourcePacks(_ userPacks: [String], game: GameCore, renderer: WorldRe
         renderer.sunTex = nil
         renderer.moonTex = nil
         ui.packUI = nil
-        ui.cv.guiTexture = nil
+        gAppDelegate?.uiMetal.guiTexture = nil
+        ui.cv.hasGuiSheet = false
         packFontWidths = nil
         print("[packs] procedural atlas restored")
     }
