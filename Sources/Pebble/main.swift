@@ -403,6 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
     func applicationDidFinishLaunching(_ notification: Notification) {
         gAppDelegate = self
         installAppleNetTransport()   // LAN sessions advertise via Bonjour
+        installAppleUIServices()
         let t0 = CFAbsoluteTimeGetCurrent()
         game = GameCore()
         game.host = host
@@ -733,3 +734,54 @@ app.mainMenu = mainMenu
 app.windowsMenu = winMenu
 
 app.run()
+
+
+// ---------------------------------------------------------------------------
+// AppKit implementations of the portable UI seams (PORTING module 09) —
+// the screens/menus/HUD in PebbleCoreBase reach the shell only through these
+// ---------------------------------------------------------------------------
+func installAppleUIServices() {
+    platformQuit = { NSApp.terminate(nil) }
+    platformSetClipboard = { s in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+    }
+    platformGetClipboard = { NSPasteboard.general.string(forType: .string) ?? "" }
+    platformIsFullscreen = { gAppDelegate?.window?.styleMask.contains(.fullScreen) ?? false }
+    platformToggleFullscreen = { gAppDelegate?.window?.toggleFullScreen(nil) }
+    platformRelayoutGUI = {
+        if let a = gAppDelegate {
+            a.ui.resize(Double(a.gameView.drawableSize.width),
+                        Double(a.gameView.drawableSize.height),
+                        a.game.settings.guiScale, relayout: a.game)
+        }
+    }
+    platformMeshedSectionsNear = { pcx, pcz in
+        guard let renderer = gAppDelegate?.renderer else { return 0 }
+        var n = 0
+        for key in renderer.sections.keys where abs(key.cx - pcx) <= 2 && abs(key.cz - pcz) <= 2 {
+            n += 1
+        }
+        return n
+    }
+    platformOpenSkinsScreen = { ui, game in ui.open(SkinsScreen(), game) }
+    platformLoadSkinBlob = { (try? Data(contentsOf: customSkinURL)) ?? Data() }
+    makeLanDiscovery = { AppleLanDiscovery() }
+}
+
+/// Bonjour browsing wrapped in the portable discovery protocol — endpoints
+/// stay inside the dial closures, no NW types cross into the screens
+final class AppleLanDiscovery: LanDiscovery {
+    private let browser = NetBrowser()
+    var onUpdate: (([DiscoveredGame]) -> Void)?
+
+    func start() {
+        browser.onUpdate = { [weak self] found in
+            self?.onUpdate?(found.map { f in
+                DiscoveredGame(name: f.name, txt: f.txt, dial: { netDial(f.endpoint) })
+            })
+        }
+        browser.start()
+    }
+    func stop() { browser.stop() }
+}

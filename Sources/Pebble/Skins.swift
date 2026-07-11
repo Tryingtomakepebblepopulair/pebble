@@ -78,6 +78,7 @@ func currentSkinTemplateData() -> Data? {
 
 // =============================================================================
 final class SkinsScreen: Screen {
+    override init() { super.init() }
     var status = ""
     var statusColor = "#A0FFA0"
     private var statusY = 0.0

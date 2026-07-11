@@ -894,7 +894,8 @@ final class PackUI {
     private(set) var fontWidths: [Double]?
 
     /// cell origins in the composite texture (each 512×512; content = base×2)
-    static let CELLS: [String: (Int, Int)] = [
+    static let CELLS = PACK_UI_CELLS
+    private static let _oldCELLS: [String: (Int, Int)] = [
         "icons": (0, 0), "widgets": (512, 0), "ascii": (1024, 0), "bg": (1536, 0),
         "inventory": (0, 512), "generic_54": (512, 512), "crafting_table": (1024, 512), "furnace": (1536, 512),
         "brewing_stand": (0, 1024), "enchanting_table": (512, 1024), "anvil": (1024, 1024), "hopper": (1536, 1024),
@@ -988,3 +989,6 @@ final class PackUI {
         texture = tex
     }
 }
+
+
+extension PackUI: PackUISheets {}

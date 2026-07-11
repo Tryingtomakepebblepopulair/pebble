@@ -1,15 +1,12 @@
 // Menus — title screen, world select/create, pause,
 // settings (video/audio/controls/accessibility), advancements tree, credits.
 
-import AppKit
 import Foundation
-import QuartzCore
-import PebbleCore
 
 // =============================================================================
-final class TitleScreen: Screen {
-    var splash = ""
-    static let SPLASHES = [
+public final class TitleScreen: Screen {
+    public var splash = ""
+    public static let SPLASHES = [
         "Punch a tree!", "Watch out for creepers!", "Don't dig straight down!",
         "Diamonds run deep!", "Now with wardens!", "Sculk is listening!",
         "The dragon is waiting!", "Cherry blossoms!", "Archaeology!",
@@ -19,11 +16,11 @@ final class TitleScreen: Screen {
         "Lava is not a swimming pool!", "Blame the goat!", "Bring a bucket!",
         "Mostly bug free!", "Creepers hate him!", "The chickens are watching!",
     ]
-    override init() {
+    public override init() {
         super.init()
         closeOnEsc = false
     }
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         if splash.isEmpty { splash = TitleScreen.SPLASHES[Int.random(in: 0..<TitleScreen.SPLASHES.count)] }
         let cx = (ui.width / 2).rounded(.down)
         // vanilla layout: stacked main buttons at h/4+48, then a half-width row
@@ -40,7 +37,7 @@ final class TitleScreen: Screen {
         y += 24
         buttons.append(Button(cx - 100, y, 200, 20, "Skins...", { [weak ui, weak game] in
             guard let ui, let game else { return }
-            ui.open(SkinsScreen(), game)
+            platformOpenSkinsScreen?(ui, game)
         }))
         y += 24
         buttons.append(Button(cx - 100, y, 200, 20, "Credits", { [weak ui, weak game] in
@@ -53,15 +50,15 @@ final class TitleScreen: Screen {
             ui.open(SettingsScreen(), game)
         }))
         buttons.append(Button(cx + 2, y, 98, 20, "Quit Game", {
-            NSApp.terminate(nil)
+            platformQuit()
         }))
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         let cv = ui.cv
-        let now = CACurrentMediaTime() * 1000
+        let now = uiNow() * 1000
         if !ui.titlePhoto {
             // no photo bundled: animated gradient sky + floating cubes fallback
-            let t = CACurrentMediaTime() * 1000 / 30000
+            let t = uiNow() * 1000 / 30000
             let top = "hsl(\(215 + Foundation.sin(t) * 12), 55%, \(28 + Foundation.sin(t * 1.7) * 6)%)"
             let bottom = "hsl(\(230 + Foundation.cos(t) * 10), 45%, 12%)"
             cv.fillRect(0, 0, ui.width, ui.height, top: top, bottom: bottom)
@@ -96,14 +93,16 @@ final class TitleScreen: Screen {
 }
 
 // =============================================================================
-final class WorldSelectScreen: Screen {
-    var worlds: [WorldRecord] = []
-    var selected = -1
-    var loaded = false
-    var playBtn: Button!
-    var deleteBtn: Button!
+public final class WorldSelectScreen: Screen {
+    public override init() { super.init() }
 
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public var worlds: [WorldRecord] = []
+    public var selected = -1
+    public var loaded = false
+    public var playBtn: Button!
+    public var deleteBtn: Button!
+
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         worlds = game.listWorlds().sorted { $0.lastPlayed > $1.lastPlayed }
         loaded = true
         let cx = (ui.width / 2).rounded(.down)
@@ -141,7 +140,7 @@ final class WorldSelectScreen: Screen {
         max(0, Double(worlds.count) * 30 - (listBottom(ui) - listTop))
     }
 
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDirtBg()
         ui.cv.drawTextCentered("Select World", ui.width / 2, 10, 1)
         playBtn.enabled = selected >= 0
@@ -179,11 +178,11 @@ final class WorldSelectScreen: Screen {
         }
         ui.drawButtons(self)
     }
-    override func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool {
+    public override func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool {
         scroll = min(max(0, scroll + dy * 12), maxScroll(ui))
         return true
     }
-    override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    public override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         // buttons take priority — invisible list rows must never eat their clicks
         if super.onMouseDown(ui, game, mx, my, btn) { return true }
         let listX = (ui.width / 2).rounded(.down) - 130
@@ -206,14 +205,14 @@ final class WorldSelectScreen: Screen {
 }
 
 // =============================================================================
-final class WorldCreateScreen: Screen {
-    let nameField = TextField(0, 0, 200, 16, "New World")
-    let seedField = TextField(0, 0, 200, 16, "Leave blank for random")
-    var mode = GameMode.survival
-    var difficulty = 2
-    var creating = false
+public final class WorldCreateScreen: Screen {
+    public let nameField = TextField(0, 0, 200, 16, "New World")
+    public let seedField = TextField(0, 0, 200, 16, "Leave blank for random")
+    public var mode = GameMode.survival
+    public var difficulty = 2
+    public var creating = false
 
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         let cx = (ui.width / 2).rounded(.down)
         nameField.x = cx - 100
         nameField.y = 40
@@ -247,7 +246,7 @@ final class WorldCreateScreen: Screen {
             ui.closeTop(game)
         }))
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDirtBg()
         ui.cv.drawTextCentered("Create New World", ui.width / 2, 10, 1)
         ui.cv.drawText("World Name", nameField.x, nameField.y - 10, 1, "#a0a0a0")
@@ -259,34 +258,31 @@ final class WorldCreateScreen: Screen {
     }
 }
 
-let DIFFICULTY_NAMES = ["Peaceful", "Easy", "Normal", "Hard"]
+public let DIFFICULTY_NAMES = ["Peaceful", "Easy", "Normal", "Hard"]
 
 // =============================================================================
 /// shown right after world entry while nearby chunks mesh — sim keeps running
 /// (the player is frozen by heldForChunks until the ground exists)
-final class LoadingScreen: Screen {
-    private var openedAt = CACurrentMediaTime()
-    static let target = 30
+public final class LoadingScreen: Screen {
+    private var openedAt = uiNow()
+    public static let target = 30
 
-    override init() {
+    public override init() {
         super.init()
         closeOnEsc = false
     }
     /// sections meshed within 2 chunks of the player
     private func progress(_ game: GameCore) -> (Int, Int, Bool) {
-        guard let renderer = gAppDelegate?.renderer, game.hasWorld(), let p = game.player else {
+        guard game.hasWorld(), let p = game.player else {
             return (0, Self.target, false)
         }
         let pcx = Int(p.x.rounded(.down)) >> 4, pcz = Int(p.z.rounded(.down)) >> 4
-        var n = 0
-        for key in renderer.sections.keys where abs(key.cx - pcx) <= 2 && abs(key.cz - pcz) <= 2 {
-            n += 1
-        }
+        let n = min(platformMeshedSectionsNear(pcx, pcz), Self.target)
         return (n, Self.target, n >= Self.target)
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         let (done, target, ready) = progress(game)
-        let elapsed = CACurrentMediaTime() - openedAt
+        let elapsed = uiNow() - openedAt
         if (ready && elapsed > 0.4) || elapsed > 8 {
             ui.closeTop(game)
             return
@@ -305,12 +301,12 @@ final class LoadingScreen: Screen {
 }
 
 // =============================================================================
-final class PauseScreen: Screen {
-    override init() {
+public final class PauseScreen: Screen {
+    public override init() {
         super.init()
         pausesGame = true
     }
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         let cx = (ui.width / 2).rounded(.down)
         var y = (ui.height / 2).rounded(.down) - 50
         buttons.append(Button(cx - 100, y, 200, 20, "Back to Game", { [weak ui, weak game] in
@@ -348,7 +344,7 @@ final class PauseScreen: Screen {
             game.exitToTitle()
         }))
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDarkBg(0.5)
         ui.cv.drawTextCentered("Game Menu", ui.width / 2, (ui.height / 2).rounded(.down) - 70, 1)
         if game.netHost != nil || game.netGuest != nil {
@@ -360,14 +356,14 @@ final class PauseScreen: Screen {
 }
 
 // =============================================================================
-final class SettingsScreen: Screen {
-    var tab = "video"
-    var bindingKey: String?
+public final class SettingsScreen: Screen {
+    public var tab = "video"
+    public var bindingKey: String?
 
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         rebuild(ui, game)
     }
-    func rebuild(_ ui: UIManager, _ game: GameCore) {
+    public func rebuild(_ ui: UIManager, _ game: GameCore) {
         buttons = []
         sliders = []
         let cx = (ui.width / 2).rounded(.down)
@@ -428,11 +424,7 @@ final class SettingsScreen: Screen {
                     game?.applySettings()
                     // re-layout immediately — applySettings only persists,
                     // and ui.resize otherwise waits for a window resize
-                    if let a = gAppDelegate {
-                        a.ui.resize(Double(a.gameView.drawableSize.width),
-                                    Double(a.gameView.drawableSize.height),
-                                    a.game.settings.guiScale, relayout: a.game)
-                    }
+                    platformRelayoutGUI()
                 }))
             y += 22
             toggle("Fancy Graphics", { game.settings.fancyGraphics }, { game.settings.fancyGraphics = $0 }, 0)
@@ -445,8 +437,8 @@ final class SettingsScreen: Screen {
             toggle("View Bobbing", { game.settings.viewBobbing }, { game.settings.viewBobbing = $0 }, 1)
             y += 22
             toggle("Fullscreen",
-                   { gAppDelegate?.window?.styleMask.contains(.fullScreen) ?? false },
-                   { _ in gAppDelegate?.window?.toggleFullScreen(nil) }, 0)
+                   { platformIsFullscreen() },
+                   { _ in platformToggleFullscreen() }, 0)
             y += 22
             sliders.append(Slider(cx - 160, y, W, 18,
                 { [weak game] in "Particles: \(["Minimal", "Decreased", "All"][min(2, game?.settings.particles ?? 2)])" },
@@ -557,7 +549,7 @@ final class SettingsScreen: Screen {
             ui.closeTop(game)
         }))
     }
-    override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
+    public override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
         if let binding = bindingKey {
             game.keybinds[binding] = key
             bindingKey = nil
@@ -567,7 +559,7 @@ final class SettingsScreen: Screen {
         }
         return super.onKey(ui, game, key)
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         if game.hasWorld() {
             ui.drawDarkBg(0.65)
         } else {
@@ -580,13 +572,13 @@ final class SettingsScreen: Screen {
 
 // =============================================================================
 // =============================================================================
-final class AdvancementsScreen: Screen {
-    var scrollX = 0.0
-    var scrollY = 0.0
-    var dragging = false
-    var positions: [String: (Double, Double)] = [:]
+public final class AdvancementsScreen: Screen {
+    public var scrollX = 0.0
+    public var scrollY = 0.0
+    public var dragging = false
+    public var positions: [String: (Double, Double)] = [:]
 
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         // layout: BFS depth → column, siblings → rows
         var children: [String: [AdvancementDef]] = [:]
         for a in ADVANCEMENTS {
@@ -612,7 +604,7 @@ final class AdvancementsScreen: Screen {
             ui.closeTop(game)
         }))
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDarkBg(0.7)
         let cv = ui.cv
         cv.drawTextCentered("Advancements (\(game.advancements.earnedOrder.count)/\(ADVANCEMENTS.count))", ui.width / 2, 6, 1)
@@ -649,33 +641,33 @@ final class AdvancementsScreen: Screen {
         ui.drawButtons(self)
         cv.drawText("Drag to pan", ui.width - 70, ui.height - 12, 1, "#808080")
     }
-    override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    public override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         if super.onMouseDown(ui, game, mx, my, btn) { return true }
         dragging = true
         return true
     }
-    override func onMouseUp(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
+    public override func onMouseUp(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
         super.onMouseUp(ui, game, mx, my)
         dragging = false
     }
-    override func onMouseMove(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
+    public override func onMouseMove(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
         super.onMouseMove(ui, game, mx, my)
         if dragging {
             scrollX += mx - ui.mouseX
             scrollY += my - ui.mouseY
         }
     }
-    override func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool {
+    public override func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool {
         scrollY -= (dy > 0 ? 1 : dy < 0 ? -1 : 0) * 20
         return true
     }
 }
 
 // =============================================================================
-final class CreditsScreen: Screen {
-    var scroll = 0.0
-    private var lastT = CACurrentMediaTime()
-    let lines = [
+public final class CreditsScreen: Screen {
+    public var scroll = 0.0
+    private var lastT = uiNow()
+    public let lines = [
         "§ePEBBLE",
         "",
         "§7A complete block-survival game",
@@ -709,11 +701,11 @@ final class CreditsScreen: Screen {
         "§funmodified, by the Faithful Team.",
         "§efaithfulpack.net",
     ]
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.cv.setFill("#000000")
         ui.cv.fillRect(0, 0, ui.width, ui.height)
         // time-based: a per-frame increment scrolled 2-10× too fast uncapped
-        let nowT = CACurrentMediaTime()
+        let nowT = uiNow()
         scroll += min(0.25, nowT - lastT) * 15
         lastT = nowT
         var y = ui.height - scroll

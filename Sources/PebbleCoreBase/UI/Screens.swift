@@ -3,45 +3,43 @@
 // beacon, trading, creative, sign, death, chat. Same layouts and slot logic.
 
 import Foundation
-import QuartzCore
-import PebbleCore
 
 // =============================================================================
 // Base container screen with player inventory
 // =============================================================================
-class ContainerScreen: Screen {
-    var panelX = 0.0
-    var panelY = 0.0
-    var panelW = 176.0
-    var panelH = 166.0
-    var title = ""
-    var titleX = 8.0              // panel-local title position (vanilla titleLabelX/Y)
-    var titleY = 6.0
-    var showInvLabel = true       // vanilla hides "Inventory" on the survival inventory
-    var sheet: String?            // pack GUI container texture key (nil = procedural panel)
-    var playerSlots: [SlotDef] = []
-    var containerSlots: [SlotDef] = []
+open class ContainerScreen: Screen {
+    open var panelX = 0.0
+    open var panelY = 0.0
+    open var panelW = 176.0
+    open var panelH = 166.0
+    open var title = ""
+    open var titleX = 8.0              // panel-local title position (vanilla titleLabelX/Y)
+    open var titleY = 6.0
+    open var showInvLabel = true       // vanilla hides "Inventory" on the survival inventory
+    open var sheet: String?            // pack GUI container texture key (nil = procedural panel)
+    open var playerSlots: [SlotDef] = []
+    open var containerSlots: [SlotDef] = []
     /// y of the player inventory slot grid, panel-local (vanilla: imageHeight−83/−84)
-    var playerInvY: Double { panelH - 83 }
+    open var playerInvY: Double { panelH - 83 }
     /// true when this frame's panel came from the pack texture (slot bgs baked in)
     private(set) var textured = false
 
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    open override func initScreen(_ ui: UIManager, _ game: GameCore) {
         panelX = ((ui.width - panelW) / 2).rounded(.down)
         panelY = ((ui.height - panelH) / 2).rounded(.down)
         playerSlots = playerInvSlots(game.player, panelX + 7, panelY + playerInvY)
         buildSlots(ui, game)
         slots = containerSlots + playerSlots
     }
-    func buildSlots(_ ui: UIManager, _ game: GameCore) {}
+    open func buildSlots(_ ui: UIManager, _ game: GameCore) {}
 
     /// draw the panel from the pack sheet; subclasses override for multi-piece blits
-    func drawSheetPanel(_ ui: UIManager) -> Bool {
+    open func drawSheetPanel(_ ui: UIManager) -> Bool {
         guard let sheet else { return false }
         return ui.blitSheet(sheet, 0, 0, panelW, panelH, panelX, panelY)
     }
 
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    open override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDarkBg(0.55)
         textured = drawSheetPanel(ui)
         if !textured { ui.drawPanel(panelX, panelY, panelW, panelH) }
@@ -53,9 +51,9 @@ class ContainerScreen: Screen {
         ui.drawSlots(self, slotBg: !textured)
         ui.drawButtons(self)
     }
-    func drawExtra(_ ui: UIManager, _ game: GameCore) {}
+    open func drawExtra(_ ui: UIManager, _ game: GameCore) {}
 
-    override func quickMove(_ game: GameCore, _ slot: SlotDef) {
+    open override func quickMove(_ game: GameCore, _ slot: SlotDef) {
         guard let s = slot.get() else { return }
         let fromContainer = containerSlots.contains { $0 === slot }
         let targets = fromContainer ? playerSlots : containerSlots.filter { !$0.output }
@@ -70,11 +68,11 @@ class ContainerScreen: Screen {
 // =============================================================================
 // Inventory (survival) — 2×2 crafting + armor + offhand
 // =============================================================================
-final class InventoryScreen: ContainerScreen {
-    var craftGrid: [ItemStack?] = [nil, nil, nil, nil]
-    var craftResult: ItemStack?
+public final class InventoryScreen: ContainerScreen {
+    public var craftGrid: [ItemStack?] = [nil, nil, nil, nil]
+    public var craftResult: ItemStack?
 
-    override init() {
+    public override init() {
         super.init()
         title = "Crafting"
         titleX = 97
@@ -82,7 +80,7 @@ final class InventoryScreen: ContainerScreen {
         showInvLabel = false
         sheet = "inventory"
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let p = game.player!
         let px = panelX, py = panelY
         for i in 0..<4 {
@@ -120,10 +118,10 @@ final class InventoryScreen: ContainerScreen {
                 game?.advance("craft_any")
             }))
     }
-    func updateResult() {
+    public func updateResult() {
         craftResult = matchCrafting(craftGrid, 2, 2)?.out
     }
-    override func drawExtra(_ ui: UIManager, _ game: GameCore) {
+    public override func drawExtra(_ ui: UIManager, _ game: GameCore) {
         let cv = ui.cv
         // vanilla inventory.png bakes the preview window, slot art and arrow in;
         // procedurally we draw the window frame + arrow ourselves
@@ -134,7 +132,7 @@ final class InventoryScreen: ContainerScreen {
         }
         // simple front-facing player figure centered in the preview window
         let cx = panelX + 50, by = panelY + 10
-        let sway = Foundation.sin(CACurrentMediaTime() * 1000 / 600) * 1.5
+        let sway = Foundation.sin(uiNow() * 1000 / 600) * 1.5
         let p = game.player!
         func px(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ c: String) {
             cv.setFill(c)
@@ -153,7 +151,7 @@ final class InventoryScreen: ContainerScreen {
         px(1, 49, 5, 4, p.armor[3] != nil ? "#909098" : "#6a6a6a")
         if p.armor[0] != nil { px(-6, 0, 12, 5, "#c8c8d0") }
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         for i in 0..<4 {
             if let s = craftGrid[i] {
                 _ = game.player.give(s)
@@ -166,17 +164,17 @@ final class InventoryScreen: ContainerScreen {
 // =============================================================================
 // Crafting table 3×3
 // =============================================================================
-final class CraftingScreen: ContainerScreen {
-    var craftGrid: [ItemStack?] = Array(repeating: nil, count: 9)
-    var craftResult: ItemStack?
+public final class CraftingScreen: ContainerScreen {
+    public var craftGrid: [ItemStack?] = Array(repeating: nil, count: 9)
+    public var craftResult: ItemStack?
 
-    override init() {
+    public override init() {
         super.init()
         title = "Crafting"
         titleX = 29
         sheet = "crafting_table"
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         for i in 0..<9 {
             let idx = i
@@ -200,15 +198,15 @@ final class CraftingScreen: ContainerScreen {
                 self.updateResult()
             }))
     }
-    func updateResult() {
+    public func updateResult() {
         craftResult = matchCrafting(craftGrid, 3, 3)?.out
     }
-    override func drawExtra(_ ui: UIManager, _ game: GameCore) {
+    public override func drawExtra(_ ui: UIManager, _ game: GameCore) {
         if !textured {
             ui.cv.drawText("▶", panelX + 95, panelY + 38, 2, "#3f3f3f", shadow: false)
         }
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         for i in 0..<9 {
             if let s = craftGrid[i] {
                 _ = game.player.give(s)
@@ -221,16 +219,16 @@ final class CraftingScreen: ContainerScreen {
 // =============================================================================
 // Furnace / blast furnace / smoker
 // =============================================================================
-final class FurnaceScreen: ContainerScreen {
+public final class FurnaceScreen: ContainerScreen {
     private let be: BlockEntityData
 
-    init(_ be: BlockEntityData) {
+    public init(_ be: BlockEntityData) {
         self.be = be
         super.init()
         title = be.kind == "blast" ? "Blast Furnace" : be.kind == "smoker" ? "Smoker" : "Furnace"
         sheet = "furnace"
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         let be = self.be
         containerSlots.append(SlotDef(
@@ -254,7 +252,7 @@ final class FurnaceScreen: ContainerScreen {
                 }
             }))
     }
-    override func drawExtra(_ ui: UIManager, _ game: GameCore) {
+    public override func drawExtra(_ ui: UIManager, _ game: GameCore) {
         let cv = ui.cv
         let px = panelX, py = panelY
         let burnTime = be.burnTime ?? 0
@@ -291,14 +289,14 @@ final class FurnaceScreen: ContainerScreen {
 // =============================================================================
 // Generic chest-style container
 // =============================================================================
-final class ChestScreen: ContainerScreen {
+public final class ChestScreen: ContainerScreen {
     private let getItems: () -> [ItemStack?]
     private let setItem: (Int, ItemStack?) -> Void
     private let count: Int
     private let other: BlockEntityData?
 
     /// items live in a BlockEntityData or a vehicle — accessors close over the owner
-    init(_ be: BlockEntityData, _ title: String, _ other: BlockEntityData? = nil) {
+    public init(_ be: BlockEntityData, _ title: String, _ other: BlockEntityData? = nil) {
         count = be.items?.count ?? 27
         getItems = { be.items ?? [] }
         setItem = { be.items?[$0] = $1 }
@@ -308,7 +306,7 @@ final class ChestScreen: ContainerScreen {
         let total = count + (other?.items?.count ?? 0)
         panelH = 114 + Double((total + 8) / 9) * 18
     }
-    init(vehicle: Boat, _ title: String) {
+    public init(vehicle: Boat, _ title: String) {
         count = vehicle.chestItems.count
         getItems = { vehicle.chestItems }
         setItem = { vehicle.chestItems[$0] = $1 }
@@ -317,7 +315,7 @@ final class ChestScreen: ContainerScreen {
         self.title = title
         panelH = 114 + Double((count + 8) / 9) * 18
     }
-    init(vehicle: Minecart, _ title: String) {
+    public init(vehicle: Minecart, _ title: String) {
         count = vehicle.chestItems.count
         getItems = { vehicle.chestItems }
         setItem = { vehicle.chestItems[$0] = $1 }
@@ -326,7 +324,7 @@ final class ChestScreen: ContainerScreen {
         self.title = title
         panelH = 114 + Double((count + 8) / 9) * 18
     }
-    init(items: @escaping () -> [ItemStack?], set: @escaping (Int, ItemStack?) -> Void, count: Int, _ title: String) {
+    public init(items: @escaping () -> [ItemStack?], set: @escaping (Int, ItemStack?) -> Void, count: Int, _ title: String) {
         self.count = count
         getItems = items
         setItem = set
@@ -337,11 +335,11 @@ final class ChestScreen: ContainerScreen {
     }
 
     /// vanilla generic_54 player grid sits at imageHeight−84 (one px above the 166-panel layouts)
-    override var playerInvY: Double { panelH - 84 }
+    public override var playerInvY: Double { panelH - 84 }
 
     /// generic_54.png is sliced vanilla-style: header+rows piece, then the
     /// player-inventory piece from y=126 — works for any 1–6 row container
-    override func drawSheetPanel(_ ui: UIManager) -> Bool {
+    public override func drawSheetPanel(_ ui: UIManager) -> Bool {
         let rows = (panelH - 114) / 18
         let total = containerSlots.count
         guard total % 9 == 0, rows >= 1, rows <= 6, ui.hasSheet("generic_54") else { return false }
@@ -351,7 +349,7 @@ final class ChestScreen: ContainerScreen {
         return true
     }
 
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         var i = 0
         for idx in 0..<count {
@@ -379,16 +377,16 @@ final class ChestScreen: ContainerScreen {
 // =============================================================================
 // Brewing stand
 // =============================================================================
-final class BrewingScreen: ContainerScreen {
+public final class BrewingScreen: ContainerScreen {
     private let be: BlockEntityData
 
-    init(_ be: BlockEntityData) {
+    public init(_ be: BlockEntityData) {
         self.be = be
         super.init()
         title = "Brewing Stand"
         sheet = "brewing_stand"
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         let be = self.be
         let bottlePositions: [(Double, Double)] = [(55, 50), (79, 57), (103, 50)]
@@ -408,7 +406,7 @@ final class BrewingScreen: ContainerScreen {
             get: { be.items![4] }, set: { be.items![4] = $0 },
             canPlace: { itemDef($0.id).name == "blaze_powder" }))
     }
-    override func drawExtra(_ ui: UIManager, _ game: GameCore) {
+    public override func drawExtra(_ ui: UIManager, _ game: GameCore) {
         let cv = ui.cv
         let px = panelX, py = panelY
         let fuelW = (18 * Double(be.fuel ?? 0) / 20).rounded()
@@ -422,7 +420,7 @@ final class BrewingScreen: ContainerScreen {
                 let j = (28 * f).rounded()
                 if j > 0 { ui.blitSheet("brewing_stand", 176, 0, 9, j, px + 97, py + 16) }
                 let lengths: [Double] = [29, 24, 20, 16, 11, 6, 0]
-                let k = lengths[Int(CACurrentMediaTime() * 10) % 7]
+                let k = lengths[Int(uiNow() * 10) % 7]
                 if k > 0 { ui.blitSheet("brewing_stand", 185, 29 - k, 12, k, px + 63, py + 14 + 29 - k) }
             }
             return
@@ -442,21 +440,21 @@ final class BrewingScreen: ContainerScreen {
 // =============================================================================
 // Enchanting table
 // =============================================================================
-final class EnchantingScreen: ContainerScreen {
-    var item: ItemStack?
-    var lapis: ItemStack?
-    var options: [EnchantOption] = []
-    var seed = Int.random(in: 0..<1_000_000_000)
-    var bookshelves = 0
+public final class EnchantingScreen: ContainerScreen {
+    public var item: ItemStack?
+    public var lapis: ItemStack?
+    public var options: [EnchantOption] = []
+    public var seed = Int.random(in: 0..<1_000_000_000)
+    public var bookshelves = 0
     private let pos: (x: Int, y: Int, z: Int)
 
-    init(_ pos: (x: Int, y: Int, z: Int)) {
+    public init(_ pos: (x: Int, y: Int, z: Int)) {
         self.pos = pos
         super.init()
         title = "Enchant"
         sheet = "enchanting_table"
     }
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         super.initScreen(ui, game)
         var n = 0
         for dz in -2...2 {
@@ -469,7 +467,7 @@ final class EnchantingScreen: ContainerScreen {
         }
         bookshelves = min(15, n)
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         containerSlots.append(SlotDef(
             x: px + 14, y: py + 46,
@@ -489,10 +487,10 @@ final class EnchantingScreen: ContainerScreen {
             canPlace: { itemDef($0.id).name == "lapis_lazuli" },
             onChange: { [weak self] in self?.refresh() }))
     }
-    func refresh() {
+    public func refresh() {
         options = enchantingOptions(item, bookshelves, seed)
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         super.draw(ui, game, partial)
         let cv = ui.cv
         let px = panelX, py = panelY
@@ -515,7 +513,7 @@ final class EnchantingScreen: ContainerScreen {
         }
         cv.drawText("Bookshelves: \(bookshelves)", px + 60, py + 73, 1, "#3f3f3f", shadow: false)
     }
-    override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    public override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         let px = panelX, py = panelY
         for i in 0..<3 {
             let bx = px + 60, by = py + 14 + Double(i) * 19
@@ -538,7 +536,7 @@ final class EnchantingScreen: ContainerScreen {
         }
         return super.onMouseDown(ui, game, mx, my, btn)
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         if let item { _ = game.player.give(item) }
         if let lapis { _ = game.player.give(lapis) }
     }
@@ -547,27 +545,27 @@ final class EnchantingScreen: ContainerScreen {
 // =============================================================================
 // Anvil
 // =============================================================================
-final class AnvilScreen: ContainerScreen {
-    var left: ItemStack?
-    var right: ItemStack?
-    var result: ItemStack?
-    var cost = 0
-    let nameField = TextField(0, 0, 96, 14)
+public final class AnvilScreen: ContainerScreen {
+    public var left: ItemStack?
+    public var right: ItemStack?
+    public var result: ItemStack?
+    public var cost = 0
+    public let nameField = TextField(0, 0, 96, 14)
     private var pos: (x: Int, y: Int, z: Int, damage: Int)
 
-    init(_ pos: (x: Int, y: Int, z: Int, damage: Int)) {
+    public init(_ pos: (x: Int, y: Int, z: Int, damage: Int)) {
         self.pos = pos
         super.init()
         title = "Repair & Name"
         sheet = "anvil"
     }
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         super.initScreen(ui, game)
         nameField.x = panelX + 60
         nameField.y = panelY + 22
         fields.append(nameField)
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         containerSlots.append(SlotDef(
             x: px + 26, y: py + 46,
@@ -621,22 +619,22 @@ final class AnvilScreen: ContainerScreen {
                 game.world.hooks.playSound("block.anvil.use", Double(self.pos.x) + 0.5, Double(self.pos.y) + 0.5, Double(self.pos.z) + 0.5, 1, 1)
             }))
     }
-    func refresh() {
+    public func refresh() {
         let r = anvilCombine(left, right, nameField.text.isEmpty ? nil : nameField.text)
         result = r?.out
         cost = r?.cost ?? 0
     }
-    override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
+    public override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
         let r = super.onChar(ui, game, ch)
         if r { refresh() }
         return r
     }
-    override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
+    public override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
         let r = super.onKey(ui, game, key)
         if r { refresh() }
         return r
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         super.draw(ui, game, partial)
         if cost > 0 {
             let ok = game.player.xpLevel >= cost && cost < 40
@@ -647,13 +645,13 @@ final class AnvilScreen: ContainerScreen {
             ui.cv.drawText("+", panelX + 56, panelY + 50, 1, "#3f3f3f", shadow: false)
         }
     }
-    override func drawExtra(_ ui: UIManager, _ game: GameCore) {
+    public override func drawExtra(_ ui: UIManager, _ game: GameCore) {
         if textured {
             // vanilla text-field art strip below the GUI in anvil.png
             ui.blitSheet("anvil", 0, 166, 110, 16, panelX + 59, panelY + 20)
         }
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         if let left { _ = game.player.give(left) }
         if let right { _ = game.player.give(right) }
     }
@@ -662,18 +660,18 @@ final class AnvilScreen: ContainerScreen {
 // =============================================================================
 // Grindstone
 // =============================================================================
-final class GrindstoneScreen: ContainerScreen {
-    var top: ItemStack?
-    var bottom: ItemStack?
-    var result: ItemStack?
-    var xp = 0
+public final class GrindstoneScreen: ContainerScreen {
+    public var top: ItemStack?
+    public var bottom: ItemStack?
+    public var result: ItemStack?
+    public var xp = 0
 
-    override init() {
+    public override init() {
         super.init()
         title = "Repair & Disenchant"
         sheet = "grindstone"
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         containerSlots.append(SlotDef(
             x: px + 48, y: py + 18,
@@ -708,12 +706,12 @@ final class GrindstoneScreen: ContainerScreen {
                 game.playUISound("block.grindstone.use")
             }))
     }
-    func refresh() {
+    public func refresh() {
         let r = grindstoneResult(top, bottom)
         result = r?.out
         xp = r?.xp ?? 0
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         if let top { _ = game.player.give(top) }
         if let bottom { _ = game.player.give(bottom) }
     }
@@ -722,17 +720,17 @@ final class GrindstoneScreen: ContainerScreen {
 // =============================================================================
 // Stonecutter
 // =============================================================================
-final class StonecutterScreen: ContainerScreen {
-    var input: ItemStack?
-    var selected = -1
-    var options: [(output: String, count: Int)] = []
+public final class StonecutterScreen: ContainerScreen {
+    public var input: ItemStack?
+    public var selected = -1
+    public var options: [(output: String, count: Int)] = []
 
-    override init() {
+    public override init() {
         super.init()
         title = "Stonecutter"
         sheet = "stonecutter"
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         containerSlots.append(SlotDef(
             x: px + 19, y: py + 32,
@@ -767,7 +765,7 @@ final class StonecutterScreen: ContainerScreen {
                 game?.playUISound("ui.stonecutter.take_result")
             }))
     }
-    func refresh() {
+    public func refresh() {
         options = []
         selected = -1
         guard let input else { return }
@@ -780,7 +778,7 @@ final class StonecutterScreen: ContainerScreen {
     private var gridY: Double { panelY + (textured ? 15 : 14) }
     private var cellW: Double { textured ? 16 : 18 }
 
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         super.draw(ui, game, partial)
         let cv = ui.cv
         for i in 0..<min(12, options.count) {
@@ -797,7 +795,7 @@ final class StonecutterScreen: ContainerScreen {
             cv.drawItemIcon(iid(options[i].output), nil, ox + (cellW - 16) / 2, oy + 1, 16, 16)
         }
     }
-    override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    public override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         let px = gridX, py = gridY
         if mx >= px && mx < px + cellW * 4 && my >= py && my < py + 54 {
             let i = Int((mx - px) / cellW) + Int((my - py) / 18) * 4
@@ -809,7 +807,7 @@ final class StonecutterScreen: ContainerScreen {
         }
         return super.onMouseDown(ui, game, mx, my, btn)
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         if let input { _ = game.player.give(input) }
     }
 }
@@ -817,19 +815,19 @@ final class StonecutterScreen: ContainerScreen {
 // =============================================================================
 // Smithing table
 // =============================================================================
-final class SmithingScreen: ContainerScreen {
-    var template: ItemStack?
-    var base: ItemStack?
-    var addition: ItemStack?
-    var result: ItemStack?
+public final class SmithingScreen: ContainerScreen {
+    public var template: ItemStack?
+    public var base: ItemStack?
+    public var addition: ItemStack?
+    public var result: ItemStack?
 
-    override init() {
+    public override init() {
         super.init()
         title = "Upgrade Gear"
         titleX = 44
         sheet = "smithing"
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX, py = panelY
         func mk(_ x: Double, _ getF: @escaping () -> ItemStack?, _ setF: @escaping (ItemStack?) -> Void) -> SlotDef {
             SlotDef(
@@ -865,15 +863,15 @@ final class SmithingScreen: ContainerScreen {
             if stack.count <= 0 { s = nil }
         }
     }
-    func refresh() {
+    public func refresh() {
         result = matchSmithing(template, base, addition)
     }
-    override func drawExtra(_ ui: UIManager, _ game: GameCore) {
+    public override func drawExtra(_ ui: UIManager, _ game: GameCore) {
         if !textured {
             ui.cv.drawText("▶", panelX + 74, panelY + 48, 1, "#3f3f3f", shadow: false)
         }
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         for s in [template, base, addition] {
             if let s { _ = game.player.give(s) }
         }
@@ -886,18 +884,18 @@ final class SmithingScreen: ContainerScreen {
 // =============================================================================
 // Beacon
 // =============================================================================
-final class BeaconScreen: Screen {
-    var payment: ItemStack?
-    var pendingPrimary: String?
-    var panelX = 0.0
-    var panelY = 0.0
+public final class BeaconScreen: Screen {
+    public var payment: ItemStack?
+    public var pendingPrimary: String?
+    public var panelX = 0.0
+    public var panelY = 0.0
     private let be: BlockEntityData
 
-    init(_ be: BlockEntityData) {
+    public init(_ be: BlockEntityData) {
         self.be = be
         super.init()
     }
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         panelX = ((ui.width - 200) / 2).rounded(.down)
         panelY = ((ui.height - 120) / 2).rounded(.down)
         slots.append(SlotDef(
@@ -907,7 +905,7 @@ final class BeaconScreen: Screen {
             canPlace: { ["iron_ingot", "gold_ingot", "diamond", "emerald", "netherite_ingot"].contains(itemDef($0.id).name) }))
         pendingPrimary = be.primary
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDarkBg(0.55)
         ui.drawPanel(panelX, panelY, 200, 120)
         let cv = ui.cv
@@ -933,7 +931,7 @@ final class BeaconScreen: Screen {
         cv.fillRect(panelX + 10, panelY + 92, 60, 16)
         cv.drawTextCentered("Confirm", panelX + 40, panelY + 96, 1, can ? "#ffffff" : "#808080")
     }
-    override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    public override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         let powers = ["speed", "haste", "resistance", "jump_boost", "strength"]
         let minLvls = [1, 1, 2, 2, 3]
         for i in 0..<powers.count {
@@ -957,7 +955,7 @@ final class BeaconScreen: Screen {
         }
         return super.onMouseDown(ui, game, mx, my, btn)
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         if let payment { _ = game.player.give(payment) }
     }
 }
@@ -965,22 +963,22 @@ final class BeaconScreen: Screen {
 // =============================================================================
 // Villager trading
 // =============================================================================
-final class TradingScreen: ContainerScreen {
-    var selected = 0
-    var buyA: ItemStack?
-    var buyB: ItemStack?
+public final class TradingScreen: ContainerScreen {
+    public var selected = 0
+    public var buyA: ItemStack?
+    public var buyB: ItemStack?
     private let villager: Mob
 
-    init(_ villager: Mob) {
+    public init(_ villager: Mob) {
         self.villager = villager
         super.init()
         panelW = 250
         title = "Trading"
     }
-    var offers: [TradeOffer] {
+    public var offers: [TradeOffer] {
         (villager as? Villager)?.offers ?? (villager as? WanderingTrader)?.offers ?? []
     }
-    override func buildSlots(_ ui: UIManager, _ game: GameCore) {
+    public override func buildSlots(_ ui: UIManager, _ game: GameCore) {
         let px = panelX + 80, py = panelY
         containerSlots.append(SlotDef(
             x: px + 24, y: py + 40,
@@ -1001,7 +999,7 @@ final class TradingScreen: ContainerScreen {
         playerSlots = playerInvSlots(game.player, panelX + 80, panelY + panelH - 83)
         slots = containerSlots + playerSlots
     }
-    func tradeResult() -> ItemStack? {
+    public func tradeResult() -> ItemStack? {
         guard selected < offers.count else { return nil }
         let o = offers[selected]
         if o.uses >= o.maxUses { return nil }
@@ -1031,7 +1029,7 @@ final class TradingScreen: ContainerScreen {
         game.playUISound("entity.villager.yes")
         game.advance("trade_villager")
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDarkBg(0.55)
         ui.drawPanel(panelX, panelY, panelW, panelH)
         let cv = ui.cv
@@ -1056,7 +1054,7 @@ final class TradingScreen: ContainerScreen {
         cv.drawText("Trade", panelX + 104, panelY + 28, 1, "#3f3f3f", shadow: false)
         ui.drawSlots(self)
     }
-    override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    public override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         for i in 0..<min(offers.count, 7) {
             let oy = panelY + 18 + Double(i) * 20
             if mx >= panelX + 5 && mx < panelX + 77 && my >= oy && my < oy + 20 {
@@ -1066,7 +1064,7 @@ final class TradingScreen: ContainerScreen {
         }
         return super.onMouseDown(ui, game, mx, my, btn)
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         if let buyA { _ = game.player.give(buyA) }
         if let buyB { _ = game.player.give(buyB) }
     }
@@ -1081,19 +1079,19 @@ private let CREATIVE_TABS: [(String, String)] = [
     ("combat", "Combat"), ("food", "Food"), ("ingredients", "Ingredients"), ("spawn_eggs", "Eggs"),
 ]
 
-final class CreativeScreen: ContainerScreen {
-    var tab = 0
-    var scroll = 0
-    let search = TextField(0, 0, 80, 12)
-    var filtered: [Int] = []
+public final class CreativeScreen: ContainerScreen {
+    public var tab = 0
+    public var scroll = 0
+    public let search = TextField(0, 0, 80, 12)
+    public var filtered: [Int] = []
 
-    override init() {
+    public override init() {
         super.init()
         panelW = 195
         panelH = 186
         title = ""
     }
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         panelX = ((ui.width - panelW) / 2).rounded(.down)
         panelY = ((ui.height - panelH) / 2).rounded(.down)
         search.x = panelX + 100
@@ -1111,7 +1109,7 @@ final class CreativeScreen: ContainerScreen {
         refresh()
         slots = playerSlots
     }
-    func refresh() {
+    public func refresh() {
         let cat = CREATIVE_TABS[tab].0
         let q = search.text.lowercased()
         filtered = []
@@ -1125,7 +1123,7 @@ final class CreativeScreen: ContainerScreen {
         }
         scroll = min(scroll, max(0, (filtered.count + 8) / 9 - 6))
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDarkBg(0.55)
         let cv = ui.cv
         for i in 0..<CREATIVE_TABS.count {
@@ -1163,7 +1161,7 @@ final class CreativeScreen: ContainerScreen {
         ui.drawButtons(self)
         cv.drawText("Destroy item: drop on grid", panelX + 4, panelY + 6, 1, "#3f3f3f", shadow: false)
     }
-    override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    public override func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         for i in 0..<CREATIVE_TABS.count {
             let tx = panelX + Double(i % 5) * 39
             let ty = i < 5 ? panelY - 14 : panelY + panelH
@@ -1188,17 +1186,17 @@ final class CreativeScreen: ContainerScreen {
         }
         return super.onMouseDown(ui, game, mx, my, btn)
     }
-    override func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool {
+    public override func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool {
         let maxScroll = max(0, (filtered.count + 8) / 9 - 6)
         scroll = max(0, min(maxScroll, scroll + (dy > 0 ? 1 : -1)))
         return true
     }
-    override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
+    public override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
         let r = super.onChar(ui, game, ch)
         if r { refresh() }
         return r
     }
-    override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
+    public override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
         let r = super.onKey(ui, game, key)
         if r { refresh() }
         return r
@@ -1208,19 +1206,19 @@ final class CreativeScreen: ContainerScreen {
 // =============================================================================
 // Sign editing
 // =============================================================================
-final class SignScreen: Screen {
-    var lines = ["", "", "", ""]
-    var lineIdx = 0
+public final class SignScreen: Screen {
+    public var lines = ["", "", "", ""]
+    public var lineIdx = 0
     private let be: BlockEntityData?
     private let pos: (x: Int, y: Int, z: Int)
 
-    init(_ be: BlockEntityData?, _ pos: (x: Int, y: Int, z: Int)) {
+    public init(_ be: BlockEntityData?, _ pos: (x: Int, y: Int, z: Int)) {
         self.be = be
         self.pos = pos
         super.init()
         if let l = be?.lines { lines = l }
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDarkBg(0.5)
         let w = 140.0, h = 80.0
         let px = ((ui.width - w) / 2).rounded(.down), py = ((ui.height - h) / 2).rounded(.down)
@@ -1230,18 +1228,18 @@ final class SignScreen: Screen {
         cv.setFill("#85643a")
         cv.fillRect(px + 2, py + 2, w - 4, h - 4)
         for i in 0..<4 {
-            let blink = i == lineIdx && Int(CACurrentMediaTime() * 1000 / 400) % 2 == 0 ? "_" : ""
+            let blink = i == lineIdx && Int(uiNow() * 1000 / 400) % 2 == 0 ? "_" : ""
             cv.drawTextCentered(lines[i] + blink, px + w / 2, py + 12 + Double(i) * 15, 1, "#1c1208", shadow: false)
         }
         cv.drawTextCentered("Press Enter / Esc to finish", px + w / 2, py + h + 8, 1)
     }
-    override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
+    public override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
         if textWidth(lines[lineIdx] + ch) < 90 {
             lines[lineIdx] += ch
         }
         return true
     }
-    override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
+    public override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
         if key == "Backspace" {
             if !lines[lineIdx].isEmpty { lines[lineIdx].removeLast() }
             return true
@@ -1257,7 +1255,7 @@ final class SignScreen: Screen {
         }
         return false
     }
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
         var sign = be
         if sign == nil {
             sign = makeSignBE(pos.x, pos.y, pos.z)
@@ -1270,15 +1268,15 @@ final class SignScreen: Screen {
 // =============================================================================
 // Death screen
 // =============================================================================
-final class DeathScreen: Screen {
+public final class DeathScreen: Screen {
     private let causeText: String
 
-    init(_ causeText: String) {
+    public init(_ causeText: String) {
         self.causeText = causeText
         super.init()
         closeOnEsc = false
     }
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         let cx = (ui.width / 2).rounded(.down)
         buttons.append(Button(cx - 100, (ui.height / 2).rounded(.down), 200, 20, "Respawn", { [weak ui, weak game] in
             guard let ui, let game else { return }
@@ -1289,7 +1287,7 @@ final class DeathScreen: Screen {
             game?.exitToTitle()
         }))
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.cv.setFill("rgba(120,0,0,0.45)")
         ui.cv.fillRect(0, 0, ui.width, ui.height)
         ui.cv.drawTextCentered("You Died!", ui.width / 2, ui.height / 2 - 50, 3)
@@ -1302,28 +1300,28 @@ final class DeathScreen: Screen {
 // =============================================================================
 // Chat / command screen + chat log
 // =============================================================================
-struct ChatMessage {
+public struct ChatMessage {
     var text: String
     var time: Double
 }
-var chatLog: [ChatMessage] = []
-func pushChat(_ text: String) {
-    chatLog.append(ChatMessage(text: text, time: CACurrentMediaTime() * 1000))
+public var chatLog: [ChatMessage] = []
+public func pushChat(_ text: String) {
+    chatLog.append(ChatMessage(text: text, time: uiNow() * 1000))
     if chatLog.count > 100 { chatLog.removeFirst() }
 }
 
-final class ChatScreen: Screen {
-    var input = ""
-    var historyIdx = -1
-    static var history: [String] = []
+public final class ChatScreen: Screen {
+    public var input = ""
+    public var historyIdx = -1
+    public static var history: [String] = []
     private let runCommandFn: (String) -> Void
 
-    init(_ runCommand: @escaping (String) -> Void, _ prefill: String = "") {
+    public init(_ runCommand: @escaping (String) -> Void, _ prefill: String = "") {
         runCommandFn = runCommand
         input = prefill
         super.init()
     }
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         let cv = ui.cv
         let maxN = min(chatLog.count, 18)
         for i in 0..<maxN {
@@ -1335,14 +1333,14 @@ final class ChatScreen: Screen {
         }
         cv.setFill("rgba(0,0,0,0.6)")
         cv.fillRect(2, ui.height - 14, ui.width - 4, 12)
-        let blink = Int(CACurrentMediaTime() * 1000 / 400) % 2 == 0 ? "_" : ""
+        let blink = Int(uiNow() * 1000 / 400) % 2 == 0 ? "_" : ""
         cv.drawText(input + blink, 4, ui.height - 12, 1)
     }
-    override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
+    public override func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
         input += ch
         return true
     }
-    override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
+    public override func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
         if key == "Backspace" {
             if !input.isEmpty { input.removeLast() }
             return true
@@ -1374,8 +1372,8 @@ final class ChatScreen: Screen {
 }
 
 /// draws recent chat while playing (no screen open)
-func drawChatOverlay(_ ui: UIManager) {
-    let now = CACurrentMediaTime() * 1000
+public func drawChatOverlay(_ ui: UIManager) {
+    let now = uiNow() * 1000
     let cv = ui.cv
     var shown = 0
     var i = chatLog.count - 1

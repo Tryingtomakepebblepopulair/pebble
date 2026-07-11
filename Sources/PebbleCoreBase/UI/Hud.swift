@@ -3,38 +3,38 @@
 // toasts. Same pixel layouts, drawn through UICanvas.
 
 import Foundation
-import QuartzCore
-import PebbleCore
 
-struct SubtitleInfo {
+public struct SubtitleInfo {
     var text: String
     var time: Int
 }
 
-final class HUD {
-    var actionBarText = ""
-    var actionBarTime = 0
-    var toasts: [(def: AdvancementDef, time: Int)] = []
-    var subtitles: [SubtitleInfo] = []
-    var bossBars: [BossBarInfo] = []
-    var debugVisible = false
-    var debugInfo: [String: String] = [:]
-    var hideGui = false
+public final class HUD {
+    public init() {}
+
+    public var actionBarText = ""
+    public var actionBarTime = 0
+    public var toasts: [(def: AdvancementDef, time: Int)] = []
+    public var subtitles: [SubtitleInfo] = []
+    public var bossBars: [BossBarInfo] = []
+    public var debugVisible = false
+    public var debugInfo: [String: String] = [:]
+    public var hideGui = false
     // HUD timers are in 20Hz ticks but draw() runs per FRAME — convert real
     // time to whole tick steps or toasts/action bars expire 2-10× too fast
     // at high fps
-    private var lastTimerTime = CACurrentMediaTime()
+    private var lastTimerTime = uiNow()
     private var timerAccum = 0.0
     private var tickSteps = 0
 
-    func showActionBar(_ text: String) {
+    public func showActionBar(_ text: String) {
         actionBarText = text
         actionBarTime = 60
     }
-    func pushToast(_ def: AdvancementDef) {
+    public func pushToast(_ def: AdvancementDef) {
         toasts.append((def, 0))
     }
-    func pushSubtitle(_ text: String) {
+    public func pushSubtitle(_ text: String) {
         if let last = subtitles.last, last.text == text {
             subtitles[subtitles.count - 1].time = 0
             return
@@ -43,9 +43,9 @@ final class HUD {
         if subtitles.count > 5 { subtitles.removeFirst() }
     }
 
-    func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         if hideGui { return }
-        let nowT = CACurrentMediaTime()
+        let nowT = uiNow()
         timerAccum += min(0.25, nowT - lastTimerTime)
         lastTimerTime = nowT
         tickSteps = Int(timerAccum * 20)
@@ -146,7 +146,7 @@ final class HUD {
             let healthY = packHud ? H - 39 : hbY - 10
             let hearts = Int((player.maxHealth / 2).rounded(.up))
             let hp = player.health
-            let shake = player.hurtTime > 0 ? (Foundation.sin(CACurrentMediaTime() * 50) * 1).rounded() : 0
+            let shake = player.hurtTime > 0 ? (Foundation.sin(uiNow() * 50) * 1).rounded() : 0
             let kind = player.hasEffect("wither") ? "wither"
                 : player.hasEffect("poison") ? "poison"
                 : player.freezeTicks > 100 ? "frozen" : "normal"

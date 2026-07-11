@@ -6,36 +6,34 @@
 //               works across the internet with a port-forwarded host
 // Identity is Settings.playerId (permanent); the name field is display-only.
 
-import AppKit
 import Foundation
 import Network
-import PebbleCore
 
-final class MultiplayerScreen: Screen {
-    let nameField = TextField(0, 0, 200, 16, "Your name")
-    let addressField = TextField(0, 0, 200, 16, "address, like 192.168.1.20:25585")
-    let serverNameField = TextField(0, 0, 200, 16, "name this server")
-    let codeField = TextField(0, 0, 200, 16, "paste a friend code (PEB1…)")
+public final class MultiplayerScreen: Screen {
+    public let nameField = TextField(0, 0, 200, 16, "Your name")
+    public let addressField = TextField(0, 0, 200, 16, "address, like 192.168.1.20:25585")
+    public let serverNameField = TextField(0, 0, 200, 16, "name this server")
+    public let codeField = TextField(0, 0, 200, 16, "paste a friend code (PEB1…)")
 
     private var tab = "lan"
-    private let browser = NetBrowser()
-    private var found: [NetBrowser.Found] = []
+    private let browser = makeLanDiscovery()
+    private var found: [DiscoveredGame] = []
     private var status = ""
     private var statusColor = "#a0a0a0"
     private var joining: NetGuestSession?
     private weak var ui: UIManager?
     private weak var game: GameCore?
 
-    override func initScreen(_ ui: UIManager, _ game: GameCore) {
+    public override func initScreen(_ ui: UIManager, _ game: GameCore) {
         self.ui = ui
         self.game = game
         nameField.text = game.settings.playerName ?? ""
-        browser.onUpdate = { [weak self] results in
+        browser?.onUpdate = { [weak self] results in
             guard let self, let ui = self.ui, let game = self.game else { return }
             self.found = results
             self.rebuild(ui, game)
         }
-        browser.start()
+        browser?.start()
         rebuild(ui, game)
     }
 
@@ -50,7 +48,7 @@ final class MultiplayerScreen: Screen {
     }
 
     /// the discovered session (if any) hosted by this friend right now
-    private func sessionOf(_ friendId: String) -> NetBrowser.Found? {
+    private func sessionOf(_ friendId: String) -> DiscoveredGame? {
         guard !friendId.isEmpty else { return nil }
         return found.first { $0.txt["pid"] == friendId }
     }
@@ -89,7 +87,7 @@ final class MultiplayerScreen: Screen {
             for f in found.prefix(6) {
                 let label = f.txt["srv"] == "1" ? "§d[Server]§r \(f.name)" : f.name
                 let b = Button(cx - 100, y, 200, 20, label, { [weak self] in
-                    self?.join(f.endpoint, shownName: f.name)
+                    self?.join(f.dial, shownName: f.name)
                 })
                 b.enabled = joining == nil
                 buttons.append(b)
@@ -102,8 +100,7 @@ final class MultiplayerScreen: Screen {
                 guard let self, let game else { return }
                 let name = self.saveName(game)
                 if let code = FriendCode.encode(pid: game.settings.playerId ?? "", name: name) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(code, forType: .string)
+                    platformSetClipboard(code)
                     self.status = "Code copied! Send it to your friend (WhatsApp, anything)."
                     self.statusColor = "#a0ffa0"
                 }
@@ -146,7 +143,7 @@ final class MultiplayerScreen: Screen {
                     ? "§a●§r \(fr.name) — playing §f\(live!.txt["world"] ?? "a world")"
                     : "§8●§r \(fr.name) — offline"
                 let joinB = Button(cx - 130, y, 200, 20, label, { [weak self] in
-                    if let live { self?.join(live.endpoint, shownName: fr.name) }
+                    if let live { self?.join(live.dial, shownName: fr.name) }
                 })
                 joinB.enabled = live != nil && joining == nil
                 buttons.append(joinB)
@@ -247,13 +244,13 @@ final class MultiplayerScreen: Screen {
         return ServerEntry(name: name, host: host, port: port)
     }
 
-    private func join(_ endpoint: NWEndpoint, shownName: String) {
+    private func join(_ dial: () -> NetConnection, shownName: String) {
         guard let game, joining == nil else { return }
         let name = saveName(game)
         status = "Joining \(shownName)…"
         statusColor = "#ffff55"
-        let skin = (try? Data(contentsOf: customSkinURL)) ?? Data()
-        joining = game.joinLan(netDial(endpoint), name: name, skin: skin)
+        let skin = platformLoadSkinBlob()
+        joining = game.joinLan(dial(), name: name, skin: skin)
         if let ui { rebuild(ui, game) }
     }
 
@@ -262,13 +259,13 @@ final class MultiplayerScreen: Screen {
         let name = saveName(game)
         status = "Connecting to \(shownName)…"
         statusColor = "#ffff55"
-        let skin = (try? Data(contentsOf: customSkinURL)) ?? Data()
-        joining = game.joinLan(netDial(host: host, port: port), name: name, skin: skin)
+        let skin = platformLoadSkinBlob()
+        joining = game.joinLan(socketDial(host: host, port: port), name: name, skin: skin)
         if let ui { rebuild(ui, game) }
     }
 
     private func abortJoin() {
-        browser.stop()
+        browser?.stop()
         if let j = joining, let game, !game.hasWorld() {
             game.netGuest = nil
             j.shutdown()
@@ -276,11 +273,11 @@ final class MultiplayerScreen: Screen {
         joining = nil
     }
 
-    override func onClose(_ ui: UIManager, _ game: GameCore) {
-        browser.stop()
+    public override func onClose(_ ui: UIManager, _ game: GameCore) {
+        browser?.stop()
     }
 
-    override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
+    public override func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {
         ui.drawDirtBg()
         ui.cv.drawTextCentered("Multiplayer", ui.width / 2, 6, 1)
         ui.cv.drawText("Your Name", nameField.x, nameField.y - 10, 1, "#a0a0a0")

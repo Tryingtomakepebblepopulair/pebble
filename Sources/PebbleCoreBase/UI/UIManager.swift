@@ -3,20 +3,18 @@
 // framework shared by every container screen. Draws through UICanvas.
 
 import Foundation
-import QuartzCore
-import PebbleCore
 
-final class SlotDef {
-    var x: Double
-    var y: Double
-    let get: () -> ItemStack?
-    let set: (ItemStack?) -> Void
-    var canPlace: ((ItemStack) -> Bool)?
-    var output = false
-    var onTake: ((ItemStack) -> Void)?
-    var onChange: (() -> Void)?
+public final class SlotDef {
+    public var x: Double
+    public var y: Double
+    public let get: () -> ItemStack?
+    public let set: (ItemStack?) -> Void
+    public var canPlace: ((ItemStack) -> Bool)?
+    public var output = false
+    public var onTake: ((ItemStack) -> Void)?
+    public var onChange: (() -> Void)?
 
-    init(x: Double, y: Double, get: @escaping () -> ItemStack?, set: @escaping (ItemStack?) -> Void,
+    public init(x: Double, y: Double, get: @escaping () -> ItemStack?, set: @escaping (ItemStack?) -> Void,
          canPlace: ((ItemStack) -> Bool)? = nil, output: Bool = false,
          onTake: ((ItemStack) -> Void)? = nil, onChange: (() -> Void)? = nil) {
         self.x = x
@@ -30,30 +28,30 @@ final class SlotDef {
     }
 }
 
-class Button {
-    var enabled = true
-    var visible = true
-    var x: Double, y: Double, w: Double, h: Double
-    var label: String
-    var onClick: () -> Void
+open class Button {
+    open var enabled = true
+    open var visible = true
+    open var x: Double, y: Double, w: Double, h: Double
+    open var label: String
+    open var onClick: () -> Void
 
-    init(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ label: String, _ onClick: @escaping () -> Void) {
+    public init(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ label: String, _ onClick: @escaping () -> Void) {
         self.x = x; self.y = y; self.w = w; self.h = h
         self.label = label
         self.onClick = onClick
     }
-    func contains(_ mx: Double, _ my: Double) -> Bool {
+    open func contains(_ mx: Double, _ my: Double) -> Bool {
         visible && enabled && mx >= x && mx < x + w && my >= y && my < y + h
     }
 }
 
-final class Slider: Button {
-    let getLabel: () -> String
-    let getValue: () -> Double
-    let setValue: (Double) -> Void
-    var dragging = false
+public final class Slider: Button {
+    public let getLabel: () -> String
+    public let getValue: () -> Double
+    public let setValue: (Double) -> Void
+    public var dragging = false
 
-    init(_ x: Double, _ y: Double, _ w: Double, _ h: Double,
+    public init(_ x: Double, _ y: Double, _ w: Double, _ h: Double,
          _ getLabel: @escaping () -> String, _ getValue: @escaping () -> Double, _ setValue: @escaping (Double) -> Void) {
         self.getLabel = getLabel
         self.getValue = getValue
@@ -62,29 +60,29 @@ final class Slider: Button {
     }
 }
 
-final class TextField {
-    var text = ""
-    var focused = false
-    var caret = 0
-    var maxLength = 64
-    var x: Double, y: Double, w: Double, h: Double
-    var placeholder: String
+public final class TextField {
+    public var text = ""
+    public var focused = false
+    public var caret = 0
+    public var maxLength = 64
+    public var x: Double, y: Double, w: Double, h: Double
+    public var placeholder: String
 
-    init(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ placeholder: String = "") {
+    public init(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ placeholder: String = "") {
         self.x = x; self.y = y; self.w = w; self.h = h
         self.placeholder = placeholder
     }
-    func contains(_ mx: Double, _ my: Double) -> Bool {
+    public func contains(_ mx: Double, _ my: Double) -> Bool {
         mx >= x && mx < x + w && my >= y && my < y + h
     }
-    func type(_ ch: String) {
+    public func type(_ ch: String) {
         if text.count < maxLength {
             let i = text.index(text.startIndex, offsetBy: caret)
             text.insert(contentsOf: ch, at: i)
             caret += ch.count
         }
     }
-    func backspace() {
+    public func backspace() {
         if caret > 0 {
             let i = text.index(text.startIndex, offsetBy: caret - 1)
             text.remove(at: i)
@@ -93,21 +91,23 @@ final class TextField {
     }
 }
 
-class Screen {
-    var closeOnEsc = true
-    var showHUD = false
-    var pausesGame = false
-    var buttons: [Button] = []
-    var sliders: [Slider] = []
-    var fields: [TextField] = []
-    var slots: [SlotDef] = []
+open class Screen {
+    public init() {}
 
-    func initScreen(_ ui: UIManager, _ game: GameCore) {}
-    func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {}
-    func onClose(_ ui: UIManager, _ game: GameCore) {}
+    open var closeOnEsc = true
+    open var showHUD = false
+    open var pausesGame = false
+    open var buttons: [Button] = []
+    open var sliders: [Slider] = []
+    open var fields: [TextField] = []
+    open var slots: [SlotDef] = []
+
+    open func initScreen(_ ui: UIManager, _ game: GameCore) {}
+    open func draw(_ ui: UIManager, _ game: GameCore, _ partial: Double) {}
+    open func onClose(_ ui: UIManager, _ game: GameCore) {}
 
     @discardableResult
-    func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
+    open func onMouseDown(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double, _ btn: Int) -> Bool {
         for f in fields { f.focused = f.contains(mx, my) }
         for b in buttons where b.contains(mx, my) {
             game.playUISound("ui.button.click")
@@ -125,16 +125,16 @@ class Screen {
         }
         return false
     }
-    func onMouseUp(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
+    open func onMouseUp(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
         for s in sliders { s.dragging = false }
     }
-    func onMouseMove(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
+    open func onMouseMove(_ ui: UIManager, _ game: GameCore, _ mx: Double, _ my: Double) {
         for s in sliders where s.dragging {
             s.setValue(max(0, min(1, (mx - s.x - 4) / (s.w - 8))))
         }
     }
-    func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool { false }
-    func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
+    open func onWheel(_ ui: UIManager, _ game: GameCore, _ dy: Double) -> Bool { false }
+    open func onKey(_ ui: UIManager, _ game: GameCore, _ key: String) -> Bool {
         for f in fields where f.focused {
             if key == "Backspace" { f.backspace(); return true }
             if key == "ArrowLeft" { f.caret = max(0, f.caret - 1); return true }
@@ -142,40 +142,40 @@ class Screen {
         }
         return false
     }
-    func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
+    open func onChar(_ ui: UIManager, _ game: GameCore, _ ch: String) -> Bool {
         for f in fields where f.focused {
             f.type(ch)
             return true
         }
         return false
     }
-    func slotAt(_ mx: Double, _ my: Double) -> SlotDef? {
+    open func slotAt(_ mx: Double, _ my: Double) -> SlotDef? {
         slots.first { mx >= $0.x && mx < $0.x + 18 && my >= $0.y && my < $0.y + 18 }
     }
     /// shift-click routing — override in container screens
-    func quickMove(_ game: GameCore, _ slot: SlotDef) {}
+    open func quickMove(_ game: GameCore, _ slot: SlotDef) {}
 }
 
-final class UIManager {
-    let cv: UICanvas
-    var packUI: PackUI?          // pack GUI sheets (nil = procedural UI)
-    var titlePhoto = false       // renderer has a title-bg photo loaded
-    var titleLogo = false        // renderer draws the wordmark texture
-    var scale = 3.0
-    var width = 0.0    // GUI units
-    var height = 0.0
-    var mouseX = 0.0
-    var mouseY = 0.0
-    var shiftDown = false
-    var cursorStack: ItemStack?
+public final class UIManager {
+    public let cv: UICanvas
+    public var packUI: PackUISheets?    // pack GUI sheets (nil = procedural UI)
+    public var titlePhoto = false       // renderer has a title-bg photo loaded
+    public var titleLogo = false        // renderer draws the wordmark texture
+    public var scale = 3.0
+    public var width = 0.0    // GUI units
+    public var height = 0.0
+    public var mouseX = 0.0
+    public var mouseY = 0.0
+    public var shiftDown = false
+    public var cursorStack: ItemStack?
     private var stack: [Screen] = []
-    var tooltipLines: [String]?
+    public var tooltipLines: [String]?
 
-    init(cv: UICanvas) {
+    public init(cv: UICanvas) {
         self.cv = cv
     }
 
-    func resize(_ pw: Double, _ ph: Double, _ guiScaleSetting: Int, relayout game: GameCore? = nil) {
+    public func resize(_ pw: Double, _ ph: Double, _ guiScaleSetting: Int, relayout game: GameCore? = nil) {
         let auto = max(1.0, min((pw / 380).rounded(.down), (ph / 240).rounded(.down)))
         let newScale = guiScaleSetting == 0 ? auto : min(Double(guiScaleSetting), auto)
         let newWidth = (pw / newScale).rounded(.up)
@@ -202,18 +202,18 @@ final class UIManager {
         }
     }
 
-    func open(_ s: Screen, _ game: GameCore) {
+    public func open(_ s: Screen, _ game: GameCore) {
         // release held movement/mouse state — keys held when a screen opens
         // never get their keyUp (the screen eats it) and stick otherwise
         if stack.isEmpty { game.clearInput() }
         stack.append(s)
         s.initScreen(self, game)
     }
-    func replace(_ s: Screen, _ game: GameCore) {
+    public func replace(_ s: Screen, _ game: GameCore) {
         closeTop(game)
         open(s, game)
     }
-    func closeTop(_ game: GameCore) {
+    public func closeTop(_ game: GameCore) {
         if let top = stack.popLast() {
             top.onClose(self, game)
         }
@@ -223,20 +223,20 @@ final class UIManager {
             cursorStack = nil
         }
     }
-    func closeAll(_ game: GameCore) {
+    public func closeAll(_ game: GameCore) {
         while !stack.isEmpty { closeTop(game) }
     }
-    func current() -> Screen? { stack.last }
-    func hasScreen() -> Bool { !stack.isEmpty }
+    public func current() -> Screen? { stack.last }
+    public func hasScreen() -> Bool { !stack.isEmpty }
 
     // ---- frame ----------------------------------------------------------------
-    func beginFrame() {
+    public func beginFrame() {
         // canvas in GUI units; the flush uniform needs the pixel framebuffer size
         cv.begin(width * scale, height * scale)
         cv.scale(scale, scale)
         tooltipLines = nil
     }
-    func endFrame() {
+    public func endFrame() {
         if let c = cursorStack {
             drawItemStack(c, mouseX - 8, mouseY - 8)
         }
@@ -246,22 +246,22 @@ final class UIManager {
     }
 
     // ---- pack GUI sheets ----------------------------------------------------------
-    func hasSheet(_ s: String) -> Bool { packUI?.sheets.contains(s) ?? false }
+    public func hasSheet(_ s: String) -> Bool { packUI?.sheets.contains(s) ?? false }
 
     /// blit a base-px region of a pack GUI sheet (sheet content is stored at 2×);
     /// returns false when the sheet isn't loaded so callers can fall back
     @discardableResult
-    func blitSheet(_ sheet: String, _ sx: Double, _ sy: Double, _ sw: Double, _ sh: Double,
+    public func blitSheet(_ sheet: String, _ sx: Double, _ sy: Double, _ sw: Double, _ sh: Double,
                    _ dx: Double, _ dy: Double, _ dw: Double? = nil, _ dh: Double? = nil,
                    tint: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)) -> Bool {
-        guard let p = packUI, p.sheets.contains(sheet), let cell = PackUI.CELLS[sheet] else { return false }
+        guard let p = packUI, p.sheets.contains(sheet), let cell = PACK_UI_CELLS[sheet] else { return false }
         cv.guiQuad(Double(cell.0) + sx * 2, Double(cell.1) + sy * 2, sw * 2, sh * 2,
                    dx, dy, dw ?? sw, dh ?? sh, tint)
         return true
     }
 
     // ---- drawing helpers --------------------------------------------------------
-    func drawPanel(_ x: Double, _ y: Double, _ w: Double, _ h: Double) {
+    public func drawPanel(_ x: Double, _ y: Double, _ w: Double, _ h: Double) {
         cv.setFill("#c6c6c6")
         cv.fillRect(x + 1, y + 1, w - 2, h - 2)
         cv.setFill("#ffffff")
@@ -276,7 +276,7 @@ final class UIManager {
         cv.fillRect(x - 1, y + 2, 1, h - 4)
         cv.fillRect(x + w, y + 2, 1, h - 4)
     }
-    func drawSlotBg(_ x: Double, _ y: Double) {
+    public func drawSlotBg(_ x: Double, _ y: Double) {
         cv.setFill("#8b8b8b")
         cv.fillRect(x, y, 18, 18)
         cv.setFill("#373737")
@@ -286,7 +286,7 @@ final class UIManager {
         cv.fillRect(x + 1, y + 17, 17, 1)
         cv.fillRect(x + 17, y + 1, 1, 17)
     }
-    func drawItemStack(_ s: ItemStack, _ x: Double, _ y: Double) {
+    public func drawItemStack(_ s: ItemStack, _ x: Double, _ y: Double) {
         cv.drawItemIcon(s.id, s.data, x + 1, y + 1, 16, 16)
         // enchant glint
         if !s.ench.isEmpty || itemDef(s.id).name == "enchanted_golden_apple" {
@@ -306,7 +306,7 @@ final class UIManager {
             cv.drawText(String(s.count), x + 18 - Double(textWidth(String(s.count))) - 1, y + 10, 1)
         }
     }
-    func drawSlot(_ s: SlotDef, _ hover: Bool, slotBg: Bool = true) {
+    public func drawSlot(_ s: SlotDef, _ hover: Bool, slotBg: Bool = true) {
         if slotBg { drawSlotBg(s.x, s.y) }
         let stack = s.get()
         if let stack { drawItemStack(stack, s.x, s.y) }
@@ -316,13 +316,13 @@ final class UIManager {
             if let stack { tooltipLines = itemTooltip(stack) }
         }
     }
-    func drawSlots(_ screen: Screen, slotBg: Bool = true) {
+    public func drawSlots(_ screen: Screen, slotBg: Bool = true) {
         for s in screen.slots {
             let hover = mouseX >= s.x && mouseX < s.x + 18 && mouseY >= s.y && mouseY < s.y + 18
             drawSlot(s, hover, slotBg: slotBg)
         }
     }
-    func drawButton(_ b: Button, _ hover: Bool) {
+    public func drawButton(_ b: Button, _ hover: Bool) {
         if !b.visible { return }
         // vanilla widgets.png strips: 46 disabled / 66 normal / 86 hover, 200×20,
         // blitted as left+right halves so any width keeps both end caps
@@ -344,7 +344,7 @@ final class UIManager {
         cv.fillRect(b.x + b.w - 1, b.y, 1, b.h)
         cv.drawTextCentered(b.label, b.x + b.w / 2, b.y + (b.h - 8) / 2, 1, b.enabled ? "#ffffff" : "#a0a0a0")
     }
-    func drawButtons(_ screen: Screen) {
+    public func drawButtons(_ screen: Screen) {
         for b in screen.buttons where !(b is Slider) {
             drawButton(b, b.contains(mouseX, mouseY))
         }
@@ -383,18 +383,18 @@ final class UIManager {
             if f.text.isEmpty && !f.placeholder.isEmpty {
                 cv.drawText(f.placeholder, f.x + 4, f.y + (f.h - 8) / 2, 1, "#5a5a5a")
             }
-            if f.focused && Int(CACurrentMediaTime() * 1000 / 400) % 2 == 0 {
+            if f.focused && Int(uiNow() * 1000 / 400) % 2 == 0 {
                 let cx = f.x + 4 + Double(textWidth(String(f.text.prefix(f.caret))))
                 cv.setFill("#ffffff")
                 cv.fillRect(cx, f.y + 3, 1, f.h - 6)
             }
         }
     }
-    func drawDarkBg(_ alpha: Double = 0.6) {
+    public func drawDarkBg(_ alpha: Double = 0.6) {
         cv.setFill("rgba(8,8,12,\(alpha))")
         cv.fillRect(0, 0, width, height)
     }
-    func drawDirtBg() {
+    public func drawDirtBg() {
         if hasSheet("bg") {
             // vanilla options background: 16px texture tiled every 32 GUI px, ×0.25 tint
             let tint = SIMD4<Float>(0.25, 0.25, 0.25, 1)
@@ -426,7 +426,7 @@ final class UIManager {
         cv.setFill("rgba(0,0,0,0.45)")
         cv.fillRect(0, 0, width, height)
     }
-    func drawTooltipBox(_ lines: [String], _ xIn: Double, _ yIn: Double) {
+    public func drawTooltipBox(_ lines: [String], _ xIn: Double, _ yIn: Double) {
         var w = 0.0
         for l in lines { w = max(w, Double(textWidth(l))) }
         let h = Double(lines.count) * 10 + 6
@@ -440,7 +440,7 @@ final class UIManager {
             cv.drawText(line, x + 4, y + 4 + Double(i) * 10, 1)
         }
     }
-    func itemTooltip(_ s: ItemStack) -> [String] {
+    public func itemTooltip(_ s: ItemStack) -> [String] {
         let def = itemDef(s.id)
         var lines: [String] = []
         let rarityColor = ["§f", "§e", "§b", "§d"][min(3, max(0, def.rarity))]
@@ -493,7 +493,7 @@ final class UIManager {
         }
     }
 
-    func handleSlotClick(_ game: GameCore, _ screen: Screen, _ slot: SlotDef, _ btn: Int, shift: Bool = false) {
+    public func handleSlotClick(_ game: GameCore, _ screen: Screen, _ slot: SlotDef, _ btn: Int, shift: Bool = false) {
         let inSlot = slot.get()
         let cursor = cursorStack
         if shift {
@@ -564,7 +564,7 @@ final class UIManager {
 }
 
 /// standard player inventory slots (27 main + 9 hotbar) at panel-local coords
-func playerInvSlots(_ player: Player, _ px: Double, _ py: Double) -> [SlotDef] {
+public func playerInvSlots(_ player: Player, _ px: Double, _ py: Double) -> [SlotDef] {
     var out: [SlotDef] = []
     for row in 0..<3 {
         for col in 0..<9 {
@@ -589,7 +589,7 @@ func playerInvSlots(_ player: Player, _ px: Double, _ py: Double) -> [SlotDef] {
 @discardableResult
 /// true if `stack` fits entirely into `targets` (merge space + empty slots) —
 /// checked before quickMoveInto when a partial insert must not happen
-func canFullyInsert(_ stack: ItemStack, _ targets: [SlotDef]) -> Bool {
+public func canFullyInsert(_ stack: ItemStack, _ targets: [SlotDef]) -> Bool {
     var remaining = stack.count
     for t in targets {
         if let ts = t.get(), canMerge(ts, stack) {
@@ -604,7 +604,7 @@ func canFullyInsert(_ stack: ItemStack, _ targets: [SlotDef]) -> Bool {
     return remaining <= 0
 }
 
-func quickMoveInto(_ stack: ItemStack, _ targets: [SlotDef]) -> Bool {
+public func quickMoveInto(_ stack: ItemStack, _ targets: [SlotDef]) -> Bool {
     for t in targets {
         if let ts = t.get(), canMerge(ts, stack) {
             let space = maxStackOf(ts) - ts.count
