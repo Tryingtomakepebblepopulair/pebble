@@ -7,7 +7,6 @@
 // Identity is Settings.playerId (permanent); the name field is display-only.
 
 import Foundation
-import Network
 
 public final class MultiplayerScreen: Screen {
     public let nameField = TextField(0, 0, 200, 16, "Your name")
