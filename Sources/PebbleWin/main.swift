@@ -1,17 +1,13 @@
-// PebbleWin — the playable Windows client (PORTING modules 09/07).
-// A Win32 window + message pump around the REAL GameCore: the same
-// simulation, worldgen, saves, and multiplayer sessions as the Mac build —
-// GameCore even does its own chunk streaming and meshing; this shell just
-// feeds input and forwards finished meshes to the Vulkan backend.
+// PebbleWin — the Windows client (PORTING modules 07/08/09). A Win32 window
+// + message pump around the REAL game: the same GameCore simulation AND the
+// same UIManager/screens/HUD as the Mac — title screen, world select,
+// options, multiplayer tabs, containers, chat — drawn through the portable
+// UICanvas into the Vulkan backend. No audio yet (module 10).
 //
-//   Pebble.exe                     singleplayer (world saved in .\PebbleData)
-//   Pebble.exe --new [--seed x]    start a fresh world
-//   Pebble.exe --join <ip[:port]> [--name <naam>]   join a friend's world
+//   Pebble.exe                      starts at the title screen, like the Mac
+//   Pebble.exe --join <ip[:port]> [--name <naam>]   scripted direct join
 //
-// Controls: click = capture mouse · WASD/space/shift/ctrl · left dig,
-// right place · 1-9 hotbar · Q drop · F offhand · Esc releases the mouse.
-// No audio and no menus yet (those modules come next); pebble-log.txt
-// records everything.
+// pebble-log.txt records everything.
 
 #if os(Windows)
 
@@ -44,10 +40,7 @@ plog("Pebble \(PEBBLE_VERSION) — Windows client (Vulkan)")
 
 // ---- args ---------------------------------------------------------------------
 var joinTarget: (host: String, port: UInt16)? = nil
-var playerName = "Speler"
-var seedText = ""
-var forceNew = false
-var skipLobby = false
+var cliName: String? = nil
 do {
     let args = Array(CommandLine.arguments.dropFirst())
     var i = 0
@@ -58,15 +51,8 @@ do {
             joinTarget = (String(parts[0]), parts.count > 1 ? UInt16(parts[1]) ?? 25585 : 25585)
             i += 1
         case "--name" where i + 1 < args.count:
-            playerName = String(args[i + 1].prefix(16))
+            cliName = String(args[i + 1].prefix(16))
             i += 1
-        case "--seed" where i + 1 < args.count:
-            seedText = args[i + 1]
-            i += 1
-        case "--new":
-            forceNew = true
-        case "--solo":
-            skipLobby = true
         default: break
         }
         i += 1
@@ -79,40 +65,32 @@ if getenv("PEBBLE_DATA_DIR") == nil {
     vcOverrideDataDir(root)
 }
 
-// ---- lobby ----------------------------------------------------------------------
-if joinTarget == nil && !skipLobby && !forceNew {
-    var prefs = loadClientPrefs()
-    if playerName == "Speler" { playerName = prefs.name }
-    let (choice, chosenName) = runLobby(defaultName: playerName, defaultServer: prefs.server)
-    playerName = chosenName
-    switch choice {
-    case .quit:
-        exit(0)
-    case .single:
-        break
-    case .join(let h, let prt):
-        joinTarget = (h, prt)
-        prefs.server = prt == 25585 ? h : "\(h):\(prt)"
-    }
-    prefs.name = playerName
-    saveClientPrefs(prefs)
-}
-
-// ---- window + input -------------------------------------------------------------
+// ---- globals the window procedure reaches --------------------------------------
 var resizedW: Int32 = 1280
 var resizedH: Int32 = 760
 var gGame: GameCore?
+var gUI: UIManager?
+var gHud: HUD?
 var gCaptured = false
 var gHwnd: HWND?
+
+let heldCleanupKeys = ["KeyW", "KeyA", "KeyS", "KeyD", "Space",
+                       "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight"]
 
 func setCapture(_ on: Bool) {
     if on == gCaptured { return }
     gCaptured = on
     ShowCursor(on ? false : true)
     if !on, let g = gGame {
-        for k in worldSafeKeys { g.keyUp(k) }   // no stuck movement keys
+        for k in heldCleanupKeys { g.keyUp(k) }   // no stuck movement keys
     }
     if on { recenterCursor() }
+}
+
+func recaptureIfClear() {
+    if let ui = gUI, !ui.hasScreen(), let g = gGame, g.hasWorld() {
+        setCapture(true)
+    }
 }
 
 func recenterCursor() {
@@ -124,45 +102,123 @@ func recenterCursor() {
     SetCursorPos(c.x, c.y)
 }
 
+func resizeUI() {
+    guard let ui = gUI, let g = gGame else { return }
+    ui.resize(Double(max(1, resizedW)), Double(max(1, resizedH)),
+              g.settings.guiScale, relayout: g)
+}
+
+/// client px → GUI units (the canvas's coordinate space)
+func uiPos(_ lParam: LPARAM) -> (Double, Double) {
+    let x = Double(Int16(truncatingIfNeeded: lParam))
+    let y = Double(Int16(truncatingIfNeeded: lParam >> 16))
+    guard let ui = gUI else { return (x, y) }
+    return (x * ui.width / Double(max(1, resizedW)),
+            y * ui.height / Double(max(1, resizedH)))
+}
+
+func routeMouseDown(_ lParam: LPARAM, _ btn: Int) {
+    guard let g = gGame, let ui = gUI else { return }
+    if let screen = ui.current() {
+        let (mx, my) = uiPos(lParam)
+        ui.mouseX = mx
+        ui.mouseY = my
+        _ = screen.onMouseDown(ui, g, mx, my, btn)
+        recaptureIfClear()
+        return
+    }
+    guard g.hasWorld() else { return }
+    if !gCaptured {
+        setCapture(true)
+        return
+    }
+    g.mouseDown(btn)
+}
+
 let wndProc: WNDPROC = { hwnd, msg, wParam, lParam in
     switch Int32(msg) {
     case WM_SIZE:
         resizedW = Int32(UInt16(truncatingIfNeeded: lParam))
         resizedH = Int32(UInt16(truncatingIfNeeded: lParam >> 16))
         pb_vk_resize(resizedW, resizedH)
+        resizeUI()
         return 0
+
     case WM_KEYDOWN:
-        if (lParam & (1 << 30)) == 0 {   // ignore auto-repeat
-            if Int32(wParam) == VK_ESCAPE {
-                setCapture(false)
-            } else if let name = pebKeyName(wParam, lParam), worldSafeKeys.contains(name) {
-                gGame?.keyDown(name, now: nowMs())
+        guard let g = gGame, let ui = gUI else { return 0 }
+        let isRepeat = (lParam & (1 << 30)) != 0
+        let code = pebKeyName(wParam, lParam) ?? ""
+        if let screen = ui.current() {
+            if isRepeat && code != "Backspace" && !code.hasPrefix("Arrow") { return 0 }
+            if code == "Escape" {
+                if screen.closeOnEsc {
+                    ui.closeTop(g)
+                    recaptureIfClear()
+                }
+                return 0
             }
+            if screen.onKey(ui, g, code) { return 0 }
+            if code == g.keybinds["inventory"], screen.closeOnEsc, !(screen is ChatScreen),
+               !screen.fields.contains(where: { $0.focused }) {
+                ui.closeTop(g)
+                recaptureIfClear()
+            }
+            return 0
+        }
+        guard g.hasWorld(), !isRepeat else { return 0 }
+        if code == "F3" { gHud?.debugVisible.toggle(); return 0 }
+        if code == "F1" { gHud?.hideGui.toggle(); return 0 }
+        if !code.isEmpty {
+            g.keyDown(code, now: nowMs(), ctrlOrCmd: GetKeyState(Int32(VK_CONTROL)) < 0)
         }
         return 0
+
+    case WM_CHAR:
+        // text input for screens (name fields, chat, world names…)
+        if let ui = gUI, let g = gGame, let screen = ui.current(),
+           wParam >= 32, wParam != 127, let u = UnicodeScalar(UInt32(wParam)) {
+            _ = screen.onChar(ui, g, String(Character(u)))
+        }
+        return 0
+
     case WM_KEYUP:
-        if let name = pebKeyName(wParam, lParam), worldSafeKeys.contains(name) {
+        if let name = pebKeyName(wParam, lParam) {
             gGame?.keyUp(name)
         }
         return 0
+
+    case WM_MOUSEMOVE:
+        if let ui = gUI, let g = gGame, ui.hasScreen() || !gCaptured {
+            let (mx, my) = uiPos(lParam)
+            ui.current()?.onMouseMove(ui, g, mx, my)
+            ui.mouseX = mx
+            ui.mouseY = my
+        }
+        return 0
+
     case WM_LBUTTONDOWN:
-        if gCaptured { gGame?.mouseDown(0) } else { setCapture(true) }
+        routeMouseDown(lParam, 0)
         return 0
     case WM_LBUTTONUP:
-        if gCaptured { gGame?.mouseUp(0) }
+        if let ui = gUI, let g = gGame, let screen = ui.current() {
+            let (mx, my) = uiPos(lParam)
+            screen.onMouseUp(ui, g, mx, my)
+        }
+        gGame?.mouseUp(0)
         return 0
     case WM_RBUTTONDOWN:
-        if gCaptured { gGame?.mouseDown(2) }
+        routeMouseDown(lParam, 2)
         return 0
     case WM_RBUTTONUP:
-        if gCaptured { gGame?.mouseUp(2) }
+        gGame?.mouseUp(2)
         return 0
     case WM_MBUTTONDOWN:
-        if gCaptured { gGame?.mouseDown(1) }
+        routeMouseDown(lParam, 1)
         return 0
     case WM_MBUTTONUP:
-        if gCaptured { gGame?.mouseUp(1) }
+        gGame?.mouseUp(1)
         return 0
+
     case WM_KILLFOCUS:
         setCapture(false)
         return 0
@@ -174,6 +230,7 @@ let wndProc: WNDPROC = { hwnd, msg, wParam, lParam in
     }
 }
 
+// ---- window ----------------------------------------------------------------------
 let hInstance = GetModuleHandleW(nil)
 "PebbleWindow".withCString(encodedAs: UTF16.self) { className in
     var wc = WNDCLASSW()
@@ -209,13 +266,30 @@ if pb_vk_create(UnsafeMutableRawPointer(hwnd), UnsafeMutableRawPointer(hInstance
 }
 plog("vulkan ready — GPU: \(String(cString: pb_vk_device_name()))")
 
-// ---- the game -------------------------------------------------------------------
+// ---- the game + the real UI stack -------------------------------------------------
 let game = GameCore()
 gGame = game
+let ui = UIManager(cv: UICanvas())
+gUI = ui
+let hud = HUD()
+gHud = hud
 let host = WinHost()
+host.ui = ui
+host.hud = hud
+host.game = game
 game.host = host
 let entityView = EntityView()
-if !playerName.isEmpty { game.settings.playerName = playerName }
+if let n = cliName { game.settings.playerName = n }
+
+// platform seams for the portable screens (PORTING module 09)
+platformQuit = {
+    game.exitToTitle()       // saves when a world is open
+    plog("clean exit (quit)")
+    exit(0)
+}
+platformMeshedSectionsNear = { pcx, pcz in host.meshedNear(pcx, pcz) }
+platformRelayoutGUI = { resizeUI() }
+platformLoadSkinBlob = { loadSkinBlob() }
 
 // procedural atlas (the same tiles the atlas goldens pin)
 let atlas = buildAtlas()
@@ -228,55 +302,34 @@ if flatAtlas.withUnsafeBufferPointer(
     exit(1)
 }
 plog("atlas: \(atlas.count) tiles — data root: \(vcSupportDir().path)")
+resizeUI()
 
 if let target = joinTarget {
-    plog("joining \(target.host):\(target.port) as \(playerName)…")
+    plog("joining \(target.host):\(target.port)…")
     _ = game.joinLan(socketDial(host: target.host, port: target.port),
-                     name: playerName, skin: loadSkinBlob())
+                     name: game.settings.playerName ?? "Speler", skin: loadSkinBlob())
     var waited = 0
-    while !game.hasWorld() && waited < 900 {   // ~15s
+    while !game.hasWorld() && waited < 900 {
         _ = game.frame(dtMs: 16)
         RunLoop.main.run(until: Date().addingTimeInterval(0.016))
         waited += 1
-        if game.netGuest == nil { break }      // connection died
+        if game.netGuest == nil { break }
     }
     if !game.hasWorld() {
-        alert("Kon niet joinen: \(game.netGuest?.status ?? "verbinding mislukt").\n"
-            + "Check het IP-adres en of de wereld open staat (Open to LAN / pebserver).")
+        alert("Kon niet joinen: \(game.netGuest?.status ?? "verbinding mislukt").")
         exit(1)
     }
-    plog("joined! world streaming in…")
 } else {
-    let existing = game.listWorlds().first { $0.name == "Windows Wereld" }
-    if let rec = existing, !forceNew {
-        plog("loading world '\(rec.name)' (seed \(rec.seed))")
-        game.loadWorld(rec.id)
-    } else {
-        plog("creating a fresh world…")
-        game.createWorld(name: "Windows Wereld", seedText: seedText, mode: 0, difficulty: 2)
-    }
-    if !game.hasWorld() {
-        alert("could not open the world (data root: \(vcSupportDir().path))")
-        exit(1)
-    }
+    // the very same title screen as the Mac
+    host.openTitleScreen()
 }
 
-// ---- sky colors (Mac skyState constants) -----------------------------------------
-func dayCurve(_ dayTime: Int) -> Double {
-    let t = Double(dayTime % DAY_LENGTH)
-    if t < 11000 { return 1 }
-    if t < 13000 { return 1 - (t - 11000) / 2000 }
-    if t < 22000 { return 0 }
-    return (t - 22000) / 2000
-}
-
-// ---- main loop --------------------------------------------------------------------
-plog("entering the world — click the window to grab the mouse, Esc to release")
+// ---- main loop ---------------------------------------------------------------------
+plog("ready — the title screen is the real Pebble UI now")
 let t0 = monotonicNow()
 var lastFrame = t0
 var frames = 0
 var lastReport = t0
-var deathAt: Double? = nil
 var msg = MSG()
 
 mainLoop: while true {
@@ -288,8 +341,8 @@ mainLoop: while true {
     // drain the main queue: chunk generation + finished meshes publish here
     RunLoop.main.run(until: Date())
 
-    // relative mouse look while captured
-    if gCaptured, game.hasWorld() {
+    // relative mouse look while captured (and no screen is open)
+    if gCaptured, game.hasWorld(), !ui.hasScreen() {
         var pt = POINT()
         GetCursorPos(&pt)
         var r = RECT()
@@ -308,23 +361,7 @@ mainLoop: while true {
     lastFrame = now
     let partial = game.frame(dtMs: min(dtMs, 100))
 
-    // the shell owns what screens would: death → auto-respawn after 2.5s
-    if host.deathMessage != nil {
-        if deathAt == nil {
-            deathAt = now
-            plog("you died — respawning…")
-        } else if now - (deathAt ?? now) > 2.5 {
-            game.respawnPlayer()
-            host.deathMessage = nil
-            deathAt = nil
-        }
-    }
-    if host.wantsPointerRelease {
-        host.wantsPointerRelease = false
-        setCapture(false)
-    }
-
-    // camera + sky
+    // camera + world + entities
     if game.hasWorld(), let p = game.player {
         let xi = p.prevX + (p.x - p.prevX) * partial
         let yi = p.prevY + (p.y - p.prevY) * partial
@@ -334,11 +371,10 @@ mainLoop: while true {
         let dirY = Float(detSin(-p.pitch))
         let dirZ = Float(detCos(p.pitch) * detCos(p.yaw))
 
-        let day = dayCurve(game.world.dayTime)
-        let dayLight = Float(max(0.06, day))
-        let d = Float(day)
-        let zen = (0.012 + (0.45 - 0.012) * d, 0.015 + (0.65 - 0.015) * d, 0.04 + (1.0 - 0.04) * d)
-        let hor = (0.04 + (0.74 - 0.04) * d, 0.05 + (0.84 - 0.05) * d, 0.1 + (1.0 - 0.1) * d)
+        // the SAME sky/day-light computation as the Mac — synced worlds
+        // look identical at the same moment
+        let sky = pebSkyColors(game.world)
+        let dayLight = Float(sky.dayLight)
 
         let aspect = Float(max(1, resizedW)) / Float(max(1, resizedH))
         let proj = mat4fPerspective(fovYRad: 70 * .pi / 180, aspect: aspect, near: 0.05, far: 800)
@@ -350,30 +386,32 @@ mainLoop: while true {
             pb_vk_set_camera($0.baseAddress, xi, eyeY, zi,
                              Float(now - t0), dayLight, Float(game.settings.gamma), 0,
                              fogEnd * 0.65, fogEnd, 0.35,
-                             hor.0, hor.1, hor.2)
+                             sky.horizon.0, sky.horizon.1, sky.horizon.2)
         }
         entityView.frame(game: game, camX: xi, camY: eyeY, camZ: zi,
                          dayLight: dayLight, partial: partial)
-        _ = pb_vk_frame(zen.0, zen.1, zen.2)
+        drawUIFrame(ui, hud, game)
+        _ = pb_vk_frame(sky.zenith.0, sky.zenith.1, sky.zenith.2)
     } else {
         pb_vk_begin_entities()
-        _ = pb_vk_frame(0.25, 0.4, 0.7)   // streaming in — plain sky
+        drawUIFrame(ui, hud, game)
+        _ = pb_vk_frame(0.16, 0.16, 0.2)   // backdrop behind the title UI
     }
 
     frames += 1
     if now - lastReport >= 5 {
         let p = game.player
-        plog(String(format: "%.0f fps, pos %.1f %.1f %.1f, %@",
+        plog(String(format: "%.0f fps, pos %.1f %.1f %.1f, screen=%@",
                     Double(frames) / (now - lastReport),
                     p?.x ?? 0, p?.y ?? 0, p?.z ?? 0,
-                    gCaptured ? "mouse captured" : "click to play"))
+                    ui.current().map { String(describing: type(of: $0)) } ?? "none"))
         frames = 0
         lastReport = now
     }
 }
 
-plog("closing — saving world…")
-game.exitToTitle()   // saves (and says goodbye to the host when joined)
+plog("closing — saving…")
+game.exitToTitle()
 pb_vk_destroy()
 plog("clean exit")
 

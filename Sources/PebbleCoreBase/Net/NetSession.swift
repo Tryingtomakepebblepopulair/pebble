@@ -308,6 +308,7 @@ public final class NetHostSession {
         let w = game.worlds[dim]!
         let puppet = Player(world: w)
         puppet.setGameMode(rec.gameMode)
+        if !g.skin.isEmpty { puppet.skinPNG = g.skin }
         puppet.netPickupSuppressed = true   // the session grants pickups explicitly
         puppet.netPuppet = true             // never dies host-side; the guest decides
         if let pd = saved?["data"] as? [String: Any] {
@@ -358,7 +359,8 @@ public final class NetHostSession {
         // introduce everyone
         if let hp = game.player {
             g.conn.send(.playerJoin(eid: Int32(hp.id), name: hostName,
-                                    pid: game.settings.playerId ?? "", skin: Data()))
+                                    pid: game.settings.playerId ?? "",
+                                    skin: platformLoadSkinBlob()))
         }
         for other in guests where other.ready && other !== g {
             if let op = other.puppet {
@@ -781,8 +783,8 @@ public final class NetGuestSession {
             default: break
             }
 
-        case let .playerJoin(eid, name, pid, _):
-            addPlayerShadow(Int(eid), name)
+        case let .playerJoin(eid, name, pid, skin):
+            addPlayerShadow(Int(eid), name, skin: skin)
             if !pid.isEmpty {
                 SocialStore.shared.recordRecent(id: pid, name: name, how: "played together")
             }
@@ -846,10 +848,11 @@ public final class NetGuestSession {
     }
 
     // ---- shadows ------------------------------------------------------------------
-    private func addPlayerShadow(_ eid: Int, _ name: String) {
+    private func addPlayerShadow(_ eid: Int, _ name: String, skin: Data = Data()) {
         playerNames[eid] = name
         guard shadowByEid[eid] == nil, game.inWorld else { return }
         let shadow = Player(world: game.world)
+        if !skin.isEmpty, skin.count <= 1 << 18 { shadow.skinPNG = skin }
         shadow.netPickupSuppressed = true
         shadow.setPos(game.player.x, game.player.y, game.player.z)
         game.world.addEntity(shadow)

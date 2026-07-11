@@ -2,9 +2,8 @@
 // legacy diagnostics and stay behind.)
 
 import Foundation
-import PebbleCore
 
-func runCommand(_ game: GameCore, _ raw: String) {
+public func runCommand(_ game: GameCore, _ raw: String) {
     if !raw.hasPrefix("/") {
         if let ng = game.netGuest {
             ng.sendChat(raw)               // the host echoes it to everyone

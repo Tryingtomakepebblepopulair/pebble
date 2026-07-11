@@ -772,26 +772,13 @@ final class WorldRenderer {
             out.fog = SIMD3<Float>(0.07, 0.06, 0.1)
             return out
         }
-        let angle = world.sunAngle()
-        let sunH = Foundation.cos(angle * .pi * 2)
-        let day = min(1.0, max(0.0, sunH * 2 + 0.5))
-        let dusk = min(1.0, max(0.0, 1 - abs(sunH) * 3.2))
-        let rain = Float(world.rainLevel)
-        let dayZen = SIMD3<Float>(0.45, 0.65, 1.0)
-        let nightZen = SIMD3<Float>(0.012, 0.015, 0.04)
-        let dayHor = SIMD3<Float>(0.74, 0.84, 1.0)
-        let nightHor = SIMD3<Float>(0.04, 0.05, 0.1)
-        var zenith = nightZen + (dayZen - nightZen) * Float(day)
-        var horizon = nightHor + (dayHor - nightHor) * Float(day)
-        let grayZ = (zenith.x + zenith.y + zenith.z) / 3
-        let grayH = (horizon.x + horizon.y + horizon.z) / 3
-        zenith = zenith + (SIMD3<Float>(grayZ * 0.7, grayZ * 0.7, grayZ * 0.75) - zenith) * rain
-        horizon = horizon + (SIMD3<Float>(grayH * 0.75, grayH * 0.75, grayH * 0.8) - horizon) * rain
-        out.zenith = zenith
-        out.horizon = horizon
-        out.fog = horizon
-        out.dayLight = min(1, max(0.06, day + cam.nightVision))
-        out.sunGlow = dusk * (1 - Double(rain))
+        // one shared computation for every platform (Render/SkyColors.swift)
+        let sky = pebSkyColors(world, nightVision: cam.nightVision)
+        out.zenith = SIMD3<Float>(sky.zenith.0, sky.zenith.1, sky.zenith.2)
+        out.horizon = SIMD3<Float>(sky.horizon.0, sky.horizon.1, sky.horizon.2)
+        out.fog = out.horizon
+        out.dayLight = sky.dayLight
+        out.sunGlow = sky.sunGlow
         return out
     }
 
@@ -1312,11 +1299,13 @@ final class WorldRenderer {
                                ent.width * 0.5 + 0.18, 0.34 * fade)
             }
             enc.setDepthStencilState(depthWrite)
+            let netSkin = (ent as? Player)?.skinPNG
             entityRenderer.draw(enc, pipeline: packTargets ? entityPipelineHDR : entityPipeline, sampler: atlasSampler,
                                 viewProj: viewProj, camPos: camPos, name: name, p: pose,
                                 time: timeSec, dayLight: dayLight,
                                 fog: (fog.0, fog.1, fog.2),
-                                gamma: game.settings.gamma, ambient: Double(w.info.ambientLight) / 15)
+                                gamma: game.settings.gamma, ambient: Double(w.info.ambientLight) / 15,
+                                cacheKey: netSkin != nil ? "player#\(ent.id)" : nil, skinPNG: netSkin)
             // players wear their armor and hold their items (partMats still
             // carries this player's pose from the body draw above)
             if let pl = ent as? Player {

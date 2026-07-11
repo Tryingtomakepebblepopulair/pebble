@@ -82,8 +82,9 @@ final class EntityRendererM {
         itemGeoms.removeAll()
     }
 
-    func geom(_ name: String) -> ModelGPU {
-        if let g = geoms[name] { return g }
+    func geom(_ name: String, cacheKey: String? = nil, skinPNG: Data? = nil) -> ModelGPU {
+        let key = cacheKey ?? name
+        if let g = geoms[key] { return g }
         let resolved = hasModel(name) ? name : "pig"
         let built = buildEntityGeometry(resolved)
         let vb = built.verts.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: max(1, $0.count))! }
@@ -91,7 +92,13 @@ final class EntityRendererM {
         // image proportions agree; otherwise the procedural skin
         var skinW = built.skin.w, skinH = built.skin.h
         var pixels = built.skin.data
-        if resolved == "player", let img = customPlayerSkin() {
+        if let blob = skinPNG, let img = decodePNG(blob),
+           img.width * built.model.texH == img.height * built.model.texW {
+            // another player's custom skin (traveled in hello/playerJoin)
+            skinW = img.width
+            skinH = img.height
+            pixels = img.pixels
+        } else if resolved == "player", let img = customPlayerSkin() {
             skinW = img.width
             skinH = img.height
             pixels = img.pixels
@@ -119,7 +126,7 @@ final class EntityRendererM {
             print("[geom] \(name): \(built.model.parts.count) parts, \(built.vertexCount) verts")
             fflush(stdout)
         }
-        geoms[name] = g
+        geoms[key] = g
         return g
     }
 
@@ -389,8 +396,8 @@ final class EntityRendererM {
     func draw(_ enc: MTLRenderCommandEncoder, pipeline: MTLRenderPipelineState, sampler: MTLSamplerState,
               viewProj: simd_float4x4, camPos: SIMD3<Double>, name: String, p: EntityPose,
               time: Double, dayLight: Double, fog: (color: SIMD3<Float>, start: Float, end: Float),
-              gamma: Double, ambient: Double) {
-        let g = geom(name)
+              gamma: Double, ambient: Double, cacheKey: String? = nil, skinPNG: Data? = nil) {
+        let g = geom(name, cacheKey: cacheKey, skinPNG: skinPNG)
         pose(g, p, time)
         var m = matrix_identity_float4x4
         m = mTranslate(m, Float(p.x - camPos.x), Float(p.y - camPos.y), Float(p.z - camPos.z))

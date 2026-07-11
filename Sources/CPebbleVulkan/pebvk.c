@@ -208,6 +208,29 @@ static double g_camX, g_camY, g_camZ;
 static float g_cutoutAlphaTest;
 static int g_worldDraws;   // 0 = sky-only clear (bootstrap mode)
 
+// ---- UI overlay: the portable UICanvas's 32-byte stream --------------------
+#define UI_ATLAS 1024
+#define MAX_UI_RECTS 128
+static VkPipeline g_pipeUI;
+static VkPipelineLayout g_uiLayout;
+static VkImage g_uiImage;
+static VkDeviceMemory g_uiMem;
+static VkImageView g_uiView;
+static VkDescriptorSet g_uiSet;
+static int g_uiImageReady;          // first barrier is UNDEFINED->...
+typedef struct {
+    int x, y, w, h;
+    unsigned char* pixels;          // malloc'd copy, freed after upload
+} PbUIRect;
+static PbUIRect g_uiRects[MAX_UI_RECTS];
+static int g_uiRectCount;
+static VkBuffer g_uiVbuf[FRAMES_IN_FLIGHT];
+static VkDeviceMemory g_uiVmem[FRAMES_IN_FLIGHT];
+static void* g_uiVmap[FRAMES_IN_FLIGHT];
+static VkDeviceSize g_uiVcap[FRAMES_IN_FLIGHT];
+static int g_uiVertCount;           // vertices to draw this frame
+static float g_uiScreen[4];         // GUI width/height push constants
+
 static void mat4_mul(float* out, const float* a, const float* b) {
     for (int c = 0; c < 4; c++) {
         for (int r = 0; r < 4; r++) {
@@ -760,6 +783,75 @@ int pb_vk_create(void* hwnd, void* hinstance, int width, int height) {
     vkDestroyShaderModule(g_device, evs, NULL);
     vkDestroyShaderModule(g_device, efs, NULL);
 
+    // UI pipeline: 32-byte canvas stream, blended, no depth
+    VkPushConstantRange upcr = { VK_SHADER_STAGE_VERTEX_BIT, 0, 16 };
+    VkPipelineLayoutCreateInfo upli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    upli.setLayoutCount = 1;
+    upli.pSetLayouts = &g_setLayout;
+    upli.pushConstantRangeCount = 1;
+    upli.pPushConstantRanges = &upcr;
+    VKTRY(vkCreatePipelineLayout(g_device, &upli, NULL, &g_uiLayout), "create UI layout");
+    VkShaderModuleCreateInfo usv = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    usv.codeSize = g_ui_vert_spv_size;
+    usv.pCode = g_ui_vert_spv;
+    VkShaderModule uvs;
+    VKTRY(vkCreateShaderModule(g_device, &usv, NULL, &uvs), "create UI vs");
+    VkShaderModuleCreateInfo usf = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    usf.codeSize = g_ui_frag_spv_size;
+    usf.pCode = g_ui_frag_spv;
+    VkShaderModule ufs;
+    VKTRY(vkCreateShaderModule(g_device, &usf, NULL, &ufs), "create UI fs");
+    stages[0].module = uvs;
+    stages[1].module = ufs;
+    VkVertexInputBindingDescription ubind = { 0, 32, VK_VERTEX_INPUT_RATE_VERTEX };
+    VkVertexInputAttributeDescription uattrs[3] = {
+        { 0, 0, VK_FORMAT_R32G32_SFLOAT, 0 },
+        { 1, 0, VK_FORMAT_R32G32_SFLOAT, 8 },
+        { 2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 16 },
+    };
+    vin.pVertexBindingDescriptions = &ubind;
+    vin.vertexAttributeDescriptionCount = 3;
+    vin.pVertexAttributeDescriptions = uattrs;
+    ds.depthTestEnable = VK_FALSE;
+    ds.depthWriteEnable = VK_FALSE;
+    gpi.layout = g_uiLayout;
+    VKTRY(vkCreateGraphicsPipelines(g_device, VK_NULL_HANDLE, 1, &gpi, NULL, &g_pipeUI),
+          "create UI pipeline");
+    vkDestroyShaderModule(g_device, uvs, NULL);
+    vkDestroyShaderModule(g_device, ufs, NULL);
+
+    // persistent 1024x1024 UI atlas (the canvas streams dirty cells into it)
+    VkImageCreateInfo uici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    uici.imageType = VK_IMAGE_TYPE_2D;
+    uici.format = VK_FORMAT_R8G8B8A8_UNORM;
+    uici.extent.width = UI_ATLAS;
+    uici.extent.height = UI_ATLAS;
+    uici.extent.depth = 1;
+    uici.mipLevels = 1;
+    uici.arrayLayers = 1;
+    uici.samples = VK_SAMPLE_COUNT_1_BIT;
+    uici.tiling = VK_IMAGE_TILING_OPTIMAL;
+    uici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    uici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VKTRY(vkCreateImage(g_device, &uici, NULL, &g_uiImage), "create UI atlas");
+    VkMemoryRequirements ureq;
+    vkGetImageMemoryRequirements(g_device, g_uiImage, &ureq);
+    VkMemoryAllocateInfo umai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    umai.allocationSize = ureq.size;
+    umai.memoryTypeIndex = find_mem_type(ureq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (umai.memoryTypeIndex == UINT32_MAX) FAIL("no memory for UI atlas");
+    VKTRY(vkAllocateMemory(g_device, &umai, NULL, &g_uiMem), "allocate UI atlas memory");
+    VKTRY(vkBindImageMemory(g_device, g_uiImage, g_uiMem, 0), "bind UI atlas memory");
+    VkImageViewCreateInfo uvci = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    uvci.image = g_uiImage;
+    uvci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    uvci.format = VK_FORMAT_R8G8B8A8_UNORM;
+    uvci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    uvci.subresourceRange.levelCount = 1;
+    uvci.subresourceRange.layerCount = 1;
+    VKTRY(vkCreateImageView(g_device, &uvci, NULL, &g_uiView), "create UI atlas view");
+    if (make_sampler_set(g_uiView, &g_uiSet) != 0) return -1;
+
     if (!g_sectionsInit) {
         for (int i = 0; i < MAX_SECTIONS; i++) g_sections[i].pass = -1;
         g_sectionsInit = 1;
@@ -1052,6 +1144,127 @@ static void record_world_draws(VkCommandBuffer cmd) {
     draw_pass(cmd, 2, 0.0f);              // water/glass — blended
 }
 
+// queue a dirty canvas-atlas cell (pixels copied; uploaded next frame)
+void pb_vk_ui_update_atlas(int x, int y, int w, int h, const unsigned char* rgba) {
+    if (g_uiRectCount >= MAX_UI_RECTS) return;
+    size_t bytes = (size_t)w * h * 4;
+    unsigned char* copy = (unsigned char*)malloc(bytes);
+    if (!copy) return;
+    memcpy(copy, rgba, bytes);
+    PbUIRect* r = &g_uiRects[g_uiRectCount++];
+    r->x = x; r->y = y; r->w = w; r->h = h;
+    r->pixels = copy;
+}
+
+// the frame's UI vertex stream (32B stride) in GUI units
+void pb_vk_ui_set_frame(const float* verts, int floatCount, float screenW, float screenH) {
+    if (!g_device) return;
+    uint32_t f = g_frame % FRAMES_IN_FLIGHT;
+    VkDeviceSize need = (VkDeviceSize)floatCount * 4;
+    g_uiVertCount = 0;
+    g_uiScreen[0] = screenW;
+    g_uiScreen[1] = screenH;
+    if (floatCount <= 0) return;
+    if (need > g_uiVcap[f]) {
+        vkDeviceWaitIdle(g_device);
+        if (g_uiVbuf[f]) {
+            vkDestroyBuffer(g_device, g_uiVbuf[f], NULL);
+            vkFreeMemory(g_device, g_uiVmem[f], NULL);
+            g_uiVbuf[f] = NULL;
+        }
+        VkDeviceSize cap = need < (1 << 20) ? (1 << 20) : need * 2;
+        if (make_buffer(cap, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                        &g_uiVbuf[f], &g_uiVmem[f], NULL) != 0) return;
+        if (vkMapMemory(g_device, g_uiVmem[f], 0, cap, 0, &g_uiVmap[f]) != VK_SUCCESS) return;
+        g_uiVcap[f] = cap;
+    }
+    memcpy(g_uiVmap[f], verts, (size_t)need);
+    g_uiVertCount = floatCount / 8;
+}
+
+/// upload queued atlas cells — records into cmd BEFORE the render pass
+static void flush_ui_atlas(VkCommandBuffer cmd) {
+    if (g_uiRectCount == 0) return;
+    // one staging buffer for all rects this frame
+    VkDeviceSize total = 0;
+    for (int i = 0; i < g_uiRectCount; i++) total += (VkDeviceSize)g_uiRects[i].w * g_uiRects[i].h * 4;
+    VkBuffer staging;
+    VkDeviceMemory stagingMem;
+    if (make_buffer(total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &staging, &stagingMem, NULL) != 0) {
+        for (int i = 0; i < g_uiRectCount; i++) free(g_uiRects[i].pixels);
+        g_uiRectCount = 0;
+        return;
+    }
+    void* map = NULL;
+    vkMapMemory(g_device, stagingMem, 0, total, 0, &map);
+    VkDeviceSize off = 0;
+    for (int i = 0; i < g_uiRectCount; i++) {
+        size_t bytes = (size_t)g_uiRects[i].w * g_uiRects[i].h * 4;
+        memcpy((char*)map + off, g_uiRects[i].pixels, bytes);
+        free(g_uiRects[i].pixels);
+        g_uiRects[i].pixels = NULL;
+        off += bytes;
+    }
+    vkUnmapMemory(g_device, stagingMem);
+
+    VkImageMemoryBarrier bar = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    bar.srcAccessMask = g_uiImageReady ? VK_ACCESS_SHADER_READ_BIT : 0;
+    bar.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    bar.oldLayout = g_uiImageReady ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
+    bar.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    bar.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bar.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bar.image = g_uiImage;
+    bar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    bar.subresourceRange.levelCount = 1;
+    bar.subresourceRange.layerCount = 1;
+    vkCmdPipelineBarrier(cmd, g_uiImageReady ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &bar);
+    off = 0;
+    for (int i = 0; i < g_uiRectCount; i++) {
+        VkBufferImageCopy copy = { 0 };
+        copy.bufferOffset = off;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.layerCount = 1;
+        copy.imageOffset.x = g_uiRects[i].x;
+        copy.imageOffset.y = g_uiRects[i].y;
+        copy.imageExtent.width = (uint32_t)g_uiRects[i].w;
+        copy.imageExtent.height = (uint32_t)g_uiRects[i].h;
+        copy.imageExtent.depth = 1;
+        vkCmdCopyBufferToImage(cmd, staging, g_uiImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        off += (VkDeviceSize)g_uiRects[i].w * g_uiRects[i].h * 4;
+    }
+    bar.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    bar.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    bar.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    bar.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, &bar);
+    g_uiImageReady = 1;
+    g_uiRectCount = 0;
+    // the staging buffer retires with the frame fence — leak-free enough for
+    // load bursts would need a retire list; UI cells are tiny, wait instead
+    vkQueueWaitIdle(g_queue);
+    vkDestroyBuffer(g_device, staging, NULL);
+    vkFreeMemory(g_device, stagingMem, NULL);
+}
+
+static void record_ui_draws(VkCommandBuffer cmd) {
+    if (g_uiVertCount == 0 || !g_uiImageReady) return;
+    uint32_t f = g_frame % FRAMES_IN_FLIGHT;
+    VkViewport vpt = { 0, 0, (float)g_extent.width, (float)g_extent.height, 0, 1 };
+    VkRect2D sc = { { 0, 0 }, g_extent };
+    vkCmdSetViewport(cmd, 0, 1, &vpt);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipeUI);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_uiLayout,
+                            0, 1, &g_uiSet, 0, NULL);
+    vkCmdPushConstants(cmd, g_uiLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, 16, g_uiScreen);
+    VkDeviceSize zero = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &g_uiVbuf[f], &zero);
+    vkCmdDraw(cmd, (uint32_t)g_uiVertCount, 1, 0, 0);
+}
+
 int pb_vk_frame(float r, float g, float b) {
     if (!g_device) return 1;
     if (g_needRebuild || !g_swapchain) {
@@ -1080,6 +1293,7 @@ int pb_vk_frame(float r, float g, float b) {
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(g_cmd[f], &bi);
+    flush_ui_atlas(g_cmd[f]);
     VkClearValue clears[2];
     clears[0].color.float32[0] = r;
     clears[0].color.float32[1] = g;
@@ -1095,6 +1309,7 @@ int pb_vk_frame(float r, float g, float b) {
     rbi.pClearValues = clears;
     vkCmdBeginRenderPass(g_cmd[f], &rbi, VK_SUBPASS_CONTENTS_INLINE);
     if (g_worldDraws) record_world_draws(g_cmd[f]);
+    record_ui_draws(g_cmd[f]);
     vkCmdEndRenderPass(g_cmd[f]);
     vkEndCommandBuffer(g_cmd[f]);
 
@@ -1145,6 +1360,16 @@ void pb_vk_destroy(void) {
             if (gm->texMem) vkFreeMemory(g_device, gm->texMem, NULL);
             gm->used = 0;
         }
+        for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+            if (g_uiVbuf[i]) vkDestroyBuffer(g_device, g_uiVbuf[i], NULL);
+            if (g_uiVmem[i]) vkFreeMemory(g_device, g_uiVmem[i], NULL);
+            g_uiVbuf[i] = NULL;
+        }
+        if (g_pipeUI) vkDestroyPipeline(g_device, g_pipeUI, NULL);
+        if (g_uiLayout) vkDestroyPipelineLayout(g_device, g_uiLayout, NULL);
+        if (g_uiView) vkDestroyImageView(g_device, g_uiView, NULL);
+        if (g_uiImage) vkDestroyImage(g_device, g_uiImage, NULL);
+        if (g_uiMem) vkFreeMemory(g_device, g_uiMem, NULL);
         if (g_pipeEntity) vkDestroyPipeline(g_device, g_pipeEntity, NULL);
         if (g_entLayout) vkDestroyPipelineLayout(g_device, g_entLayout, NULL);
         if (g_descPool) vkDestroyDescriptorPool(g_device, g_descPool, NULL);
@@ -1204,6 +1429,12 @@ int pb_vk_upload_entity_geom(int geomId, const void* verts, int vertCount,
 void pb_vk_begin_entities(void) {}
 void pb_vk_push_entity(int geomId, const float* model16, float brightness, float alpha) {
     (void)geomId; (void)model16; (void)brightness; (void)alpha;
+}
+void pb_vk_ui_update_atlas(int x, int y, int w, int h, const unsigned char* rgba) {
+    (void)x; (void)y; (void)w; (void)h; (void)rgba;
+}
+void pb_vk_ui_set_frame(const float* verts, int floatCount, float screenW, float screenH) {
+    (void)verts; (void)floatCount; (void)screenW; (void)screenH;
 }
 void pb_vk_set_camera(const float* viewProj16,
                       double camX, double camY, double camZ,

@@ -1,8 +1,7 @@
-// The Windows GameHost (PORTING module 09): GameCore drives ALL meshing,
-// chunk streaming, and gameplay itself — this bridge only forwards finished
-// meshes to the Vulkan backend and remembers what the game asked the shell
-// to do. Audio and particles are silent for now (module 10 comes later);
-// screens have no portable UI yet, so death is handled by the main loop.
+// The Windows GameHost (PORTING modules 08/09): the full bridge between
+// GameCore and the portable UI stack — the same screens, HUD, and chat as
+// the Mac's HostBridge — plus the mesh handoff to the Vulkan backend.
+// Audio stays silent until module 10.
 
 #if os(Windows)
 
@@ -17,11 +16,25 @@ func sectionKey(_ cx: Int, _ sy: Int, _ cz: Int) -> UInt64 {
 }
 
 final class WinHost: GameHost {
-    /// set when the game wants the death screen — the loop auto-respawns
-    var deathMessage: String?
-    /// set when the game asks the shell to release the mouse
-    var wantsPointerRelease = false
-    var chatLines: [String] = []
+    var ui: UIManager!
+    var hud: HUD!
+    weak var game: GameCore?
+    /// uploaded sections by chunk — feeds the loading screen's progress
+    private var meshedByChunk: [Int64: Set<Int>] = [:]
+
+    private func chunkKey(_ cx: Int, _ cz: Int) -> Int64 {
+        (Int64(cx) << 32) | Int64(UInt32(bitPattern: Int32(cz)))
+    }
+
+    func meshedNear(_ pcx: Int, _ pcz: Int) -> Int {
+        var n = 0
+        for dz in -2...2 {
+            for dx in -2...2 {
+                n += meshedByChunk[chunkKey(pcx + dx, pcz + dz)]?.count ?? 0
+            }
+        }
+        return n
+    }
 
     // ---- renderer ----------------------------------------------------------
     func uploadMesh(_ cx: Int, _ sy: Int, _ cz: Int, _ minY: Int, _ mesh: MeshOutput) {
@@ -36,6 +49,7 @@ final class WinHost: GameHost {
                 }
             }
         }
+        meshedByChunk[chunkKey(cx, cz), default: []].insert(sy)
     }
 
     func removeChunkMeshes(_ cx: Int, _ cz: Int, _ sections: Int) {
@@ -45,40 +59,75 @@ final class WinHost: GameHost {
             pb_vk_remove_section(id, 1)
             pb_vk_remove_section(id, 2)
         }
+        meshedByChunk.removeValue(forKey: chunkKey(cx, cz))
     }
 
     func clearAllSections() {
         pb_vk_clear_sections()
+        meshedByChunk.removeAll()
     }
 
-    // ---- screens (no portable UI yet) ---------------------------------------
-    func hasScreen() -> Bool { false }
-    func screenPausesGame() -> Bool { false }
-    func openScreen(_ kind: String, _ data: ScreenData?) {}
-    func openTrading(_ villager: Mob) {}
-    func openVehicleChest(_ kind: String, _ vehicle: Entity) {}
-    func openChat(_ prefix: String) {}
-    func openDeathScreen(_ message: String) { deathMessage = message }
-    func openPauseScreen() {}
-    func openTitleScreen() {}
-    func closeAllScreens() {}
-    func releasePointer() { wantsPointerRelease = true }
+    // ---- screens: the SAME portable screens as the Mac ----------------------
+    func hasScreen() -> Bool { ui?.hasScreen() ?? false }
+    func screenPausesGame() -> Bool { ui?.current()?.pausesGame ?? false }
+
+    func openScreen(_ kind: String, _ data: ScreenData?) {
+        guard let game else { return }
+        routeOpenScreen(kind, data, ui, hud, game)
+    }
+    func openTrading(_ villager: Mob) {
+        guard let game else { return }
+        ui.open(TradingScreen(villager), game)
+        setCapture(false)
+    }
+    func openVehicleChest(_ kind: String, _ vehicle: Entity) {
+        guard let game else { return }
+        let title = kind == "boat_chest" ? "Chest Boat" : "Minecart with Chest"
+        if let boat = vehicle as? Boat {
+            ui.open(ChestScreen(vehicle: boat, title), game)
+        } else if let cart = vehicle as? Minecart {
+            ui.open(ChestScreen(vehicle: cart, title), game)
+        }
+        setCapture(false)
+    }
+    func openChat(_ prefix: String) {
+        guard let game else { return }
+        ui.open(ChatScreen({ [weak game] cmd in
+            if let game { runCommand(game, cmd) }
+        }, prefix), game)
+        setCapture(false)
+    }
+    func openDeathScreen(_ message: String) {
+        guard let game else { return }
+        ui.open(DeathScreen(message), game)
+        setCapture(false)
+    }
+    func openPauseScreen() {
+        guard let game else { return }
+        ui.open(PauseScreen(), game)
+        setCapture(false)
+    }
+    func openTitleScreen() {
+        guard let game else { return }
+        ui.titlePhoto = false   // title art textures come with module 11
+        ui.titleLogo = false
+        ui.open(TitleScreen(), game)
+        setCapture(false)
+    }
+    func closeAllScreens() {
+        guard let game else { return }
+        ui.closeAll(game)
+    }
+    func releasePointer() { setCapture(false) }
 
     // ---- HUD / chat ---------------------------------------------------------
-    func showActionBar(_ text: String, _ time: Int) {}
-    func pushChat(_ line: String) {
-        chatLines.append(line)
-        var out = ""
-        var skip = false
-        for ch in line {
-            if skip { skip = false; continue }
-            if ch == "§" { skip = true; continue }
-            out.append(ch)
-        }
-        plog("[chat] \(out)")
+    func showActionBar(_ text: String, _ time: Int) {
+        hud.showActionBar(text)
+        hud.actionBarTime = time
     }
-    func pushToast(_ adv: AdvancementDef) {}
-    func setBossBars(_ bars: [BossBarInfo]) {}
+    func pushChat(_ line: String) { PebbleCoreBase.pushChat(line) }
+    func pushToast(_ adv: AdvancementDef) { hud.pushToast(adv) }
+    func setBossBars(_ bars: [BossBarInfo]) { hud.bossBars = bars }
 
     // ---- audio: module 10 — silent for now -----------------------------------
     func playSound(_ name: String, _ x: Double, _ y: Double, _ z: Double, _ volume: Double, _ pitch: Double) {}

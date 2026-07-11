@@ -75,6 +75,9 @@ open class Entity: EntityRef {
     public var passengers: [Entity] = []
     /// mark for save persistence
     public var persistent = false
+    /// custom skin PNG for player entities (travels in hello/playerJoin;
+    /// runtime-only, never saved)
+    public var skinPNG: Data?
     public var data = EntityData()
     public var portalCooldown = 0
     public var portalTime = 0

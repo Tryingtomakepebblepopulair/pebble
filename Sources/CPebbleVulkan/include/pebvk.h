@@ -55,6 +55,11 @@ void pb_vk_set_camera(const float* viewProj16,
                       float fogStart, float fogEnd, float alphaTest,
                       float fogR, float fogG, float fogB);
 
+// UI overlay (the portable UICanvas): stream dirty 1024x1024-atlas cells
+// and the frame's 32-byte vertex stream in GUI units
+void pb_vk_ui_update_atlas(int x, int y, int w, int h, const unsigned char* rgba);
+void pb_vk_ui_set_frame(const float* verts, int floatCount, float screenW, float screenH);
+
 // human-readable reason for the last failure (static buffer)
 const char* pb_vk_last_error(void);
 
