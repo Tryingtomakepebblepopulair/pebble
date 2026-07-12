@@ -80,6 +80,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path stage\assets | Out-Null
           Copy-Item packaging\title-bg.png stage\assets\
           Copy-Item packaging\logo.png stage\assets\
+          Copy-Item "packaging\Faithful 32x - 1.20.1.zip" stage\assets\
+          Copy-Item "packaging\Faithful 32x - 1.20.1 LICENSE.txt" stage\assets\ -ErrorAction SilentlyContinue
           Set-Content -Path stage\LEES-MIJ.txt -Value "PEBBLE voor Windows (testversie — nog zonder geluid)`r`n`r`nSTARTEN: dubbelklik Pebble.exe — je krijgt HET ECHTE Pebble-titelscherm,`r`nprecies zoals op de Mac: Singleplayer, Multiplayer (direct connect met`r`nip:poort), Options, alles werkt.`r`n`r`nBESTURING: zoals altijd — WASD/spatie/shift/ctrl, E inventaris, T chat,`r`nEsc pauze, links slopen, rechts bouwen. Klik in het venster om te spelen.`r`n`r`nSKIN: leg een skin.png (64x64) in de map PebbleData — vrienden zien hem,`r`njij ziet die van hen.`r`n`r`nPROBLEEM? Stuur pebble-log.txt (naast Pebble.exe) + screenshot (Win+Shift+S)"
       - uses: actions/upload-artifact@v4
         with:

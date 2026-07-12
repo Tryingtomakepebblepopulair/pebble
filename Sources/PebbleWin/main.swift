@@ -314,17 +314,30 @@ platformGetClipboard = {
 platformRelayoutGUI = { resizeUI() }
 platformLoadSkinBlob = { loadSkinBlob() }
 
-// procedural atlas (the same tiles the atlas goldens pin)
-let atlas = buildAtlas()
+// terrain: the Faithful pack when shipped, the procedural tiles otherwise
+var terrainSlices: [[UInt8]]
+var terrainRes: Int
+let packPath = FileManager.default.currentDirectoryPath + "\\assets\\Faithful 32x - 1.20.1.zip"
+if let zipData = FileManager.default.contents(atPath: packPath),
+   let pack = buildPackTerrainAtlas(zip: zipData) {
+    terrainSlices = pack.slices
+    terrainRes = pack.res
+    plog("textures: Faithful — \(pack.appliedTiles)/\(pack.slices.count) tiles at \(pack.res)×")
+} else {
+    let atlas = buildAtlas()
+    terrainSlices = atlas.pixels
+    terrainRes = TILE
+    plog("textures: procedural (no pack zip found)")
+}
 var flatAtlas = [UInt8]()
-flatAtlas.reserveCapacity(atlas.count * TILE * TILE * 4)
-for px in atlas.pixels { flatAtlas.append(contentsOf: px) }
+flatAtlas.reserveCapacity(terrainSlices.count * terrainRes * terrainRes * 4)
+for px in terrainSlices { flatAtlas.append(contentsOf: px) }
 if flatAtlas.withUnsafeBufferPointer(
-    { pb_vk_upload_atlas($0.baseAddress, Int32(TILE), Int32(TILE), Int32(atlas.count)) }) != 0 {
+    { pb_vk_upload_atlas($0.baseAddress, Int32(terrainRes), Int32(terrainRes), Int32(terrainSlices.count)) }) != 0 {
     alert("atlas upload failed: \(String(cString: pb_vk_last_error()))")
     exit(1)
 }
-plog("atlas: \(atlas.count) tiles — data root: \(vcSupportDir().path)")
+plog("atlas ready — data root: \(vcSupportDir().path)")
 resizeUI()
 
 // title art (the same PNGs the Mac bundles) from assets\ beside the exe
