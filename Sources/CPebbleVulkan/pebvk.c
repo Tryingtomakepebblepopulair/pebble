@@ -485,7 +485,11 @@ int pb_vk_create(void* hwnd, void* hinstance, int width, int height) {
                     g_queueFamily = q;
                     VkPhysicalDeviceProperties props;
                     vkGetPhysicalDeviceProperties(g_phys, &props);
-                    snprintf(g_gpu, sizeof g_gpu, "%s", props.deviceName);
+                    snprintf(g_gpu, sizeof g_gpu, "%s (maxTex %u, maxLayers %u, push %u)",
+                             props.deviceName,
+                             props.limits.maxImageDimension2D,
+                             props.limits.maxImageArrayLayers,
+                             props.limits.maxPushConstantsSize);
                 }
                 break;
             }
@@ -1005,10 +1009,31 @@ static int make_sampler_set2(VkImageView view, VkSampler smp, VkDescriptorSet* o
     return 0;
 }
 
+static int g_atlasCols = 1;
+
 int pb_vk_upload_atlas(const unsigned char* rgba, int tileW, int tileH, int layers) {
     if (!g_device) FAIL("renderer not created");
-    if (upload_texture(rgba, tileW, tileH, layers, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                       &g_atlasImage, &g_atlasMem, &g_atlasView) != 0) return -1;
+    // pack the tile stack into a 2D grid: texture arrays hit per-GPU layer
+    // limits (as low as 256) and some drivers mis-sample instead of failing
+    int cols = 1;
+    while (cols * cols < layers) cols++;
+    int rows = (layers + cols - 1) / cols;
+    g_atlasCols = cols;
+    size_t gw = (size_t)cols * tileW, gh = (size_t)rows * tileH;
+    unsigned char* grid = (unsigned char*)calloc(gw * gh, 4);
+    if (!grid) FAIL("atlas grid alloc failed");
+    for (int l = 0; l < layers; l++) {
+        size_t gx = (size_t)(l % cols) * tileW, gy = (size_t)(l / cols) * tileH;
+        const unsigned char* src = rgba + (size_t)l * tileW * tileH * 4;
+        for (int row = 0; row < tileH; row++) {
+            memcpy(grid + ((gy + row) * gw + gx) * 4,
+                   src + (size_t)row * tileW * 4, (size_t)tileW * 4);
+        }
+    }
+    int rc = upload_texture(grid, (int)gw, (int)gh, 1, VK_IMAGE_VIEW_TYPE_2D,
+                            &g_atlasImage, &g_atlasMem, &g_atlasView);
+    free(grid);
+    if (rc != 0) return -1;
     return make_sampler_set(g_atlasView, &g_atlasSet);
 }
 
@@ -1123,6 +1148,7 @@ void pb_vk_set_camera(const float* viewProj16,
 static void draw_pass(VkCommandBuffer cmd, int pass, float alphaTest) {
     PbPush push = g_push;
     push.fog[2] = alphaTest;
+    push.fogColor[3] = (float)g_atlasCols;
     for (int i = 0; i < MAX_SECTIONS; i++) {
         PbSection* s = &g_sections[i];
         if (s->pass != pass) continue;

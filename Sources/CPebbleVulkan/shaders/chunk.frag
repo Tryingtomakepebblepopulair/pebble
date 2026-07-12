@@ -16,7 +16,9 @@ layout(push_constant) uniform PC {
     vec4 fogColor;
 } pc;
 
-layout(set = 0, binding = 0) uniform sampler2DArray uAtlas;
+// tiles packed in a 2D grid (fogColor.w = columns) — texture arrays hit
+// per-GPU layer limits on some hardware and silently mis-sampled
+layout(set = 0, binding = 0) uniform sampler2D uAtlas;
 
 layout(location = 0) out vec4 outColor;
 
@@ -33,7 +35,9 @@ void main() {
     } else if (vAnim == 4u) {
         uv.y = fract(uv.y - time * 1.2 * procAnim);
     }
-    vec4 tex = texture(uAtlas, vec3(uv, float(vLayer)));
+    float cols = pc.fogColor.w;
+    vec2 cell = vec2(mod(float(vLayer), cols), floor(float(vLayer) / cols));
+    vec4 tex = texture(uAtlas, (cell + fract(uv)) / cols);
     float alphaTest = pc.fog.z;
     if (alphaTest > 0.0 && tex.a < alphaTest) discard;
 
