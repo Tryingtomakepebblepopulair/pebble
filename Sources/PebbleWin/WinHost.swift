@@ -109,9 +109,7 @@ final class WinHost: GameHost {
     }
     func openTitleScreen() {
         guard let game else { return }
-        ui.titlePhoto = false   // title art textures come with module 11
-        ui.titleLogo = false
-        ui.open(TitleScreen(), game)
+        ui.open(TitleScreen(), game)   // titlePhoto/titleLogo set at startup
         setCapture(false)
     }
     func closeAllScreens() {

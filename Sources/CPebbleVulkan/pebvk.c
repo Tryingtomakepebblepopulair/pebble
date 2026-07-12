@@ -230,6 +230,25 @@ static void* g_uiVmap[FRAMES_IN_FLIGHT];
 static VkDeviceSize g_uiVcap[FRAMES_IN_FLIGHT];
 static int g_uiVertCount;           // vertices to draw this frame
 static float g_uiScreen[4];         // GUI width/height push constants
+static VkSampler g_linearSampler;   // photos want smooth filtering
+#define MAX_UI_IMAGES 8
+typedef struct {
+    int used;
+    VkImage tex;
+    VkDeviceMemory mem;
+    VkImageView view;
+    VkDescriptorSet set;
+} PbUIImage;
+static PbUIImage g_uiImages[MAX_UI_IMAGES];
+typedef struct {
+    int id;
+    float x, y, w, h, u0, v0, u1, v1;
+} PbImageQuad;
+static PbImageQuad g_imgQuads[MAX_UI_IMAGES];
+static int g_imgQuadCount;
+static VkBuffer g_imgVbuf[FRAMES_IN_FLIGHT];
+static VkDeviceMemory g_imgVmem[FRAMES_IN_FLIGHT];
+static void* g_imgVmap[FRAMES_IN_FLIGHT];
 
 static void mat4_mul(float* out, const float* a, const float* b) {
     for (int c = 0; c < 4; c++) {
@@ -275,6 +294,7 @@ static int make_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
     return 0;
 }
 
+static int make_sampler_set2(VkImageView view, VkSampler smp, VkDescriptorSet* outSet);
 static int make_sampler_set(VkImageView view, VkDescriptorSet* outSet);
 
 // ---- swapchain (re)build ----------------------------------------------------
@@ -739,9 +759,15 @@ int pb_vk_create(void* hwnd, void* hinstance, int width, int height) {
     sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     VKTRY(vkCreateSampler(g_device, &sci, NULL, &g_atlasSampler), "create sampler");
-    VkDescriptorPoolSize pool = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_ENTITY_GEOMS + 1 };
+    sci.magFilter = VK_FILTER_LINEAR;
+    sci.minFilter = VK_FILTER_LINEAR;
+    sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    VKTRY(vkCreateSampler(g_device, &sci, NULL, &g_linearSampler), "create linear sampler");
+    VkDescriptorPoolSize pool = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_ENTITY_GEOMS + MAX_UI_IMAGES + 4 };
     VkDescriptorPoolCreateInfo dpi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    dpi.maxSets = MAX_ENTITY_GEOMS + 1;
+    dpi.maxSets = MAX_ENTITY_GEOMS + MAX_UI_IMAGES + 4;
     dpi.poolSizeCount = 1;
     dpi.pPoolSizes = &pool;
     VKTRY(vkCreateDescriptorPool(g_device, &dpi, NULL, &g_descPool), "create descriptor pool");
@@ -959,12 +985,16 @@ static int upload_texture(const unsigned char* rgba, int w, int h, int layers,
 }
 
 static int make_sampler_set(VkImageView view, VkDescriptorSet* outSet) {
+    return make_sampler_set2(view, g_atlasSampler, outSet);
+}
+
+static int make_sampler_set2(VkImageView view, VkSampler smp, VkDescriptorSet* outSet) {
     VkDescriptorSetAllocateInfo dsa = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
     dsa.descriptorPool = g_descPool;
     dsa.descriptorSetCount = 1;
     dsa.pSetLayouts = &g_setLayout;
     VKTRY(vkAllocateDescriptorSets(g_device, &dsa, outSet), "allocate descriptor set");
-    VkDescriptorImageInfo dii = { g_atlasSampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo dii = { smp, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
     VkWriteDescriptorSet wds = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     wds.dstSet = *outSet;
     wds.dstBinding = 0;
@@ -1146,6 +1176,29 @@ static void record_world_draws(VkCommandBuffer cmd) {
     draw_pass(cmd, 2, 0.0f);              // water/glass — blended
 }
 
+// register a UI image (title photo, wordmark) — straight RGBA8, linear-filtered
+int pb_vk_upload_image(int id, const unsigned char* rgba, int w, int h) {
+    if (!g_device) FAIL("renderer not created");
+    if (id < 0 || id >= MAX_UI_IMAGES) FAIL("image id out of range");
+    PbUIImage* im = &g_uiImages[id];
+    if (im->used) return 0;
+    if (upload_texture(rgba, w, h, 1, VK_IMAGE_VIEW_TYPE_2D, &im->tex, &im->mem, &im->view) != 0)
+        return -1;
+    if (make_sampler_set2(im->view, g_linearSampler, &im->set) != 0) return -1;
+    im->used = 1;
+    return 0;
+}
+
+// draw an image quad UNDER this frame's canvas verts (GUI units + UV rect)
+void pb_vk_ui_push_image(int id, float x, float y, float w, float h,
+                         float u0, float v0, float u1, float v1) {
+    if (id < 0 || id >= MAX_UI_IMAGES || !g_uiImages[id].used) return;
+    if (g_imgQuadCount >= MAX_UI_IMAGES) return;
+    PbImageQuad* q = &g_imgQuads[g_imgQuadCount++];
+    q->id = id; q->x = x; q->y = y; q->w = w; q->h = h;
+    q->u0 = u0; q->v0 = v0; q->u1 = u1; q->v1 = v1;
+}
+
 // queue a dirty canvas-atlas cell (pixels copied; uploaded next frame)
 void pb_vk_ui_update_atlas(int x, int y, int w, int h, const unsigned char* rgba) {
     if (g_uiRectCount >= MAX_UI_RECTS) return;
@@ -1252,19 +1305,52 @@ static void flush_ui_atlas(VkCommandBuffer cmd) {
 }
 
 static void record_ui_draws(VkCommandBuffer cmd) {
-    if (g_uiVertCount == 0 || !g_uiImageReady) return;
+    if (g_uiVertCount == 0 && g_imgQuadCount == 0) return;
     uint32_t f = g_frame % FRAMES_IN_FLIGHT;
     VkViewport vpt = { 0, 0, (float)g_extent.width, (float)g_extent.height, 0, 1 };
     VkRect2D sc = { { 0, 0 }, g_extent };
     vkCmdSetViewport(cmd, 0, 1, &vpt);
     vkCmdSetScissor(cmd, 0, 1, &sc);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipeUI);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_uiLayout,
-                            0, 1, &g_uiSet, 0, NULL);
     vkCmdPushConstants(cmd, g_uiLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, 16, g_uiScreen);
-    VkDeviceSize zero = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &g_uiVbuf[f], &zero);
-    vkCmdDraw(cmd, (uint32_t)g_uiVertCount, 1, 0, 0);
+
+    // background images first (title photo, wordmark) — under the canvas
+    if (g_imgQuadCount > 0) {
+        if (!g_imgVbuf[f]) {
+            if (make_buffer(MAX_UI_IMAGES * 6 * 32, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                            &g_imgVbuf[f], &g_imgVmem[f], NULL) != 0) { g_imgQuadCount = 0; return; }
+            vkMapMemory(g_device, g_imgVmem[f], 0, MAX_UI_IMAGES * 6 * 32, 0, &g_imgVmap[f]);
+        }
+        float* v = (float*)g_imgVmap[f];
+        for (int i = 0; i < g_imgQuadCount; i++) {
+            PbImageQuad* q = &g_imgQuads[i];
+            float quad[6][8] = {
+                { q->x,        q->y,        q->u0, q->v0, 1, 1, 1, 1 },
+                { q->x + q->w, q->y,        q->u1, q->v0, 1, 1, 1, 1 },
+                { q->x + q->w, q->y + q->h, q->u1, q->v1, 1, 1, 1, 1 },
+                { q->x,        q->y,        q->u0, q->v0, 1, 1, 1, 1 },
+                { q->x + q->w, q->y + q->h, q->u1, q->v1, 1, 1, 1, 1 },
+                { q->x,        q->y + q->h, q->u0, q->v1, 1, 1, 1, 1 },
+            };
+            memcpy(v + i * 48, quad, sizeof quad);
+        }
+        VkDeviceSize zero = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &g_imgVbuf[f], &zero);
+        for (int i = 0; i < g_imgQuadCount; i++) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_uiLayout,
+                                    0, 1, &g_uiImages[g_imgQuads[i].id].set, 0, NULL);
+            vkCmdDraw(cmd, 6, 1, (uint32_t)(i * 6), 0);
+        }
+        g_imgQuadCount = 0;
+    }
+
+    if (g_uiVertCount > 0 && g_uiImageReady) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_uiLayout,
+                                0, 1, &g_uiSet, 0, NULL);
+        VkDeviceSize zero = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &g_uiVbuf[f], &zero);
+        vkCmdDraw(cmd, (uint32_t)g_uiVertCount, 1, 0, 0);
+    }
 }
 
 int pb_vk_frame(float r, float g, float b) {
@@ -1367,6 +1453,20 @@ void pb_vk_destroy(void) {
             if (g_uiVmem[i]) vkFreeMemory(g_device, g_uiVmem[i], NULL);
             g_uiVbuf[i] = NULL;
         }
+        for (int i = 0; i < MAX_UI_IMAGES; i++) {
+            PbUIImage* im = &g_uiImages[i];
+            if (!im->used) continue;
+            if (im->view) vkDestroyImageView(g_device, im->view, NULL);
+            if (im->tex) vkDestroyImage(g_device, im->tex, NULL);
+            if (im->mem) vkFreeMemory(g_device, im->mem, NULL);
+            im->used = 0;
+        }
+        for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+            if (g_imgVbuf[i]) vkDestroyBuffer(g_device, g_imgVbuf[i], NULL);
+            if (g_imgVmem[i]) vkFreeMemory(g_device, g_imgVmem[i], NULL);
+            g_imgVbuf[i] = NULL;
+        }
+        if (g_linearSampler) vkDestroySampler(g_device, g_linearSampler, NULL);
         if (g_pipeUI) vkDestroyPipeline(g_device, g_pipeUI, NULL);
         if (g_uiLayout) vkDestroyPipelineLayout(g_device, g_uiLayout, NULL);
         if (g_uiView) vkDestroyImageView(g_device, g_uiView, NULL);
@@ -1434,6 +1534,14 @@ void pb_vk_push_entity(int geomId, const float* model16, float brightness, float
 }
 void pb_vk_ui_update_atlas(int x, int y, int w, int h, const unsigned char* rgba) {
     (void)x; (void)y; (void)w; (void)h; (void)rgba;
+}
+int pb_vk_upload_image(int id, const unsigned char* rgba, int w, int h) {
+    (void)id; (void)rgba; (void)w; (void)h; return -1;
+}
+void pb_vk_ui_push_image(int id, float x, float y, float w, float h,
+                         float u0, float v0, float u1, float v1) {
+    (void)id; (void)x; (void)y; (void)w; (void)h;
+    (void)u0; (void)v0; (void)u1; (void)v1;
 }
 void pb_vk_ui_set_frame(const float* verts, int floatCount, float screenW, float screenH) {
     (void)verts; (void)floatCount; (void)screenW; (void)screenH;

@@ -304,6 +304,26 @@ if flatAtlas.withUnsafeBufferPointer(
 plog("atlas: \(atlas.count) tiles — data root: \(vcSupportDir().path)")
 resizeUI()
 
+// title art (the same PNGs the Mac bundles) from assets\ beside the exe
+func loadImageAsset(_ name: String) -> PebImage? {
+    let path = FileManager.default.currentDirectoryPath + "\\assets\\" + name
+    guard let d = FileManager.default.contents(atPath: path) else { return nil }
+    return pebDecodePNG(d)
+}
+var titleBgSize: (w: Int, h: Int)? = nil
+var titleLogoSize: (w: Int, h: Int)? = nil
+if let img = loadImageAsset("title-bg.png"),
+   img.pixels.withUnsafeBufferPointer({ pb_vk_upload_image(0, $0.baseAddress, Int32(img.width), Int32(img.height)) }) == 0 {
+    titleBgSize = (img.width, img.height)
+}
+if let img = loadImageAsset("logo.png"),
+   img.pixels.withUnsafeBufferPointer({ pb_vk_upload_image(1, $0.baseAddress, Int32(img.width), Int32(img.height)) }) == 0 {
+    titleLogoSize = (img.width, img.height)
+}
+ui.titlePhoto = titleBgSize != nil
+ui.titleLogo = titleLogoSize != nil
+plog("title art: photo=\(titleBgSize != nil) logo=\(titleLogoSize != nil)")
+
 if let target = joinTarget {
     plog("joining \(target.host):\(target.port)…")
     _ = game.joinLan(socketDial(host: target.host, port: target.port),
@@ -394,8 +414,35 @@ mainLoop: while true {
         _ = pb_vk_frame(sky.zenith.0, sky.zenith.1, sky.zenith.2)
     } else {
         pb_vk_begin_entities()
+        // the Mac's title backdrop: cover-fit photo + the wordmark on top
+        if let bg = titleBgSize {
+            let sA = Double(max(1, resizedW)) / Double(max(1, resizedH))
+            let tA = Double(bg.w) / Double(bg.h)
+            var u0: Float = 0, v0: Float = 0, u1: Float = 1, v1: Float = 1
+            if tA > sA {
+                let f = Float(sA / tA)
+                u0 = (1 - f) / 2
+                u1 = u0 + f
+            } else {
+                let f = Float(tA / sA)
+                v0 = (1 - f) / 2
+                v1 = v0 + f
+            }
+            pb_vk_ui_push_image(0, 0, 0, Float(ui.width), Float(ui.height), u0, v0, u1, v1)
+        }
+        if let lg = titleLogoSize {
+            // mirror the Mac's renderTitle: auto-scale space, 52 GUI units tall
+            let pw = Double(max(1, resizedW)), ph = Double(max(1, resizedH))
+            let auto = max(1.0, min((pw / 380).rounded(.down), (ph / 240).rounded(.down)))
+            let gw = pw / auto, gh = ph / auto
+            let logoH = 52.0
+            let logoW = logoH * Double(lg.w) / Double(lg.h)
+            let kx = ui.width / gw, ky = ui.height / gh
+            pb_vk_ui_push_image(1, Float((gw / 2 - logoW / 2) * kx), Float((gh / 4 - 34) * ky),
+                                Float(logoW * kx), Float(logoH * ky), 0, 0, 1, 1)
+        }
         drawUIFrame(ui, hud, game)
-        _ = pb_vk_frame(0.16, 0.16, 0.2)   // backdrop behind the title UI
+        _ = pb_vk_frame(0.02, 0.02, 0.05)   // the Mac's title clear color
     }
 
     frames += 1

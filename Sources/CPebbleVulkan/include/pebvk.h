@@ -55,6 +55,12 @@ void pb_vk_set_camera(const float* viewProj16,
                       float fogStart, float fogEnd, float alphaTest,
                       float fogR, float fogG, float fogB);
 
+// UI images (title photo/wordmark): register once, push quads per frame
+// (GUI units + UV rect) — drawn UNDER the canvas verts, linear-filtered
+int pb_vk_upload_image(int id, const unsigned char* rgba, int w, int h);
+void pb_vk_ui_push_image(int id, float x, float y, float w, float h,
+                         float u0, float v0, float u1, float v1);
+
 // UI overlay (the portable UICanvas): stream dirty 1024x1024-atlas cells
 // and the frame's 32-byte vertex stream in GUI units
 void pb_vk_ui_update_atlas(int x, int y, int w, int h, const unsigned char* rgba);
