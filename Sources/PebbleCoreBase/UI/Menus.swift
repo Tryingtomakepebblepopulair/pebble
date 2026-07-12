@@ -86,8 +86,6 @@ public final class TitleScreen: Screen {
         cv.restore()
         cv.drawText("Pebble \(PEBBLE_VERSION)", 2, ui.height - 10, 1, "#c8c8c8")
         cv.drawText("Textures: Faithful 32x (faithfulpack.net)", 2, ui.height - 20, 1, "#909090")
-        let credit = "Singleplayer, for now"
-        cv.drawText(credit, ui.width - Double(textWidth(credit)) - 2, ui.height - 10, 1, "#c8c8c8")
         ui.drawButtons(self)
     }
 }

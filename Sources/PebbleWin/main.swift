@@ -288,6 +288,29 @@ platformQuit = {
     exit(0)
 }
 platformMeshedSectionsNear = { pcx, pcz in host.meshedNear(pcx, pcz) }
+platformSetClipboard = { text in
+    guard OpenClipboard(gHwnd) else { return }
+    EmptyClipboard()
+    let units = Array(text.utf16) + [0]
+    if let mem = GlobalAlloc(UINT(GMEM_MOVEABLE), SIZE_T(units.count * 2)) {
+        if let dst = GlobalLock(mem) {
+            units.withUnsafeBufferPointer { src in
+                memcpy(dst, src.baseAddress!, units.count * 2)
+            }
+            GlobalUnlock(mem)
+            SetClipboardData(UINT(13 /* CF_UNICODETEXT */), mem)
+        }
+    }
+    CloseClipboard()
+}
+platformGetClipboard = {
+    guard OpenClipboard(gHwnd) else { return "" }
+    defer { CloseClipboard() }
+    guard let h = GetClipboardData(UINT(13 /* CF_UNICODETEXT */)),
+          let p = GlobalLock(h) else { return "" }
+    defer { GlobalUnlock(h) }
+    return String(decodingCString: p.assumingMemoryBound(to: UInt16.self), as: UTF16.self)
+}
 platformRelayoutGUI = { resizeUI() }
 platformLoadSkinBlob = { loadSkinBlob() }
 
@@ -415,8 +438,11 @@ mainLoop: while true {
     } else {
         pb_vk_begin_entities()
         // the Mac's title backdrop: cover-fit photo + the wordmark on top
+        // the canvas draws in PIXEL space (beginFrame scales GUI→px), so
+        // image quads take pixel coordinates too
+        let pw = Double(max(1, resizedW)), ph = Double(max(1, resizedH))
         if let bg = titleBgSize {
-            let sA = Double(max(1, resizedW)) / Double(max(1, resizedH))
+            let sA = pw / ph
             let tA = Double(bg.w) / Double(bg.h)
             var u0: Float = 0, v0: Float = 0, u1: Float = 1, v1: Float = 1
             if tA > sA {
@@ -428,18 +454,16 @@ mainLoop: while true {
                 v0 = (1 - f) / 2
                 v1 = v0 + f
             }
-            pb_vk_ui_push_image(0, 0, 0, Float(ui.width), Float(ui.height), u0, v0, u1, v1)
+            pb_vk_ui_push_image(0, 0, 0, Float(pw), Float(ph), u0, v0, u1, v1)
         }
         if let lg = titleLogoSize {
-            // mirror the Mac's renderTitle: auto-scale space, 52 GUI units tall
-            let pw = Double(max(1, resizedW)), ph = Double(max(1, resizedH))
+            // mirror the Mac's renderTitle: auto-scale space × auto = pixels
             let auto = max(1.0, min((pw / 380).rounded(.down), (ph / 240).rounded(.down)))
             let gw = pw / auto, gh = ph / auto
             let logoH = 52.0
             let logoW = logoH * Double(lg.w) / Double(lg.h)
-            let kx = ui.width / gw, ky = ui.height / gh
-            pb_vk_ui_push_image(1, Float((gw / 2 - logoW / 2) * kx), Float((gh / 4 - 34) * ky),
-                                Float(logoW * kx), Float(logoH * ky), 0, 0, 1, 1)
+            pb_vk_ui_push_image(1, Float((gw / 2 - logoW / 2) * auto), Float((gh / 4 - 34) * auto),
+                                Float(logoW * auto), Float(logoH * auto), 0, 0, 1, 1)
         }
         drawUIFrame(ui, hud, game)
         _ = pb_vk_frame(0.02, 0.02, 0.05)   // the Mac's title clear color
