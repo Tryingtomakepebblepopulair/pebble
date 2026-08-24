@@ -158,6 +158,9 @@ Found a bug? [Open an issue](https://github.com/thebriangao/pebble/issues). To h
 
 Even better than a bug report is a **pull request with a fix** — see [CONTRIBUTING.md](CONTRIBUTING.md) for the build/test workflow and the conventions that are load-bearing (registration order, RNG discipline, determinism rules). PRs of all sizes are wanted, from typo fixes to subsystem work.
 
+- [VISION.md](VISION.md) — what Pebble is for and which trade-offs are already settled.
+- [AGENTS.md](AGENTS.md) — orientation for contributors and AI agents: target graph, rules, CI, hard-won gotchas.
+- [PORTING/](PORTING/) — the 14-module Windows/macOS porting plan the cross-platform work follows.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — build, test, golden workflow, load-bearing conventions.
 - [SECURITY.md](SECURITY.md) — threat model and how to report vulnerabilities privately. Pebble makes **zero network connections** and collects nothing.
 - [LICENSE](LICENSE) — MIT, covering the code in this repository. The bundled Faithful artwork is third-party content under its own terms.
