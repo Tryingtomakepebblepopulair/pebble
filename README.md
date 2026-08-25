@@ -5,7 +5,7 @@
 <h3 align="center">The open-source alternative to Minecraft: Java Edition.</h3>
 
 <p align="center">
-  <em>A complete block-survival game, built from scratch in Swift + Metal.<br>
+  <em>A complete block-survival game, built from scratch in Swift.<br>
   Every sound synthesized in real time. Every chunk carved from noise.</em>
 </p>
 
@@ -15,7 +15,7 @@
 
 ---
 
-**Pebble** is the open-source alternative to Minecraft: Java Edition — a native macOS voxel survival game with the full overworld/nether/end progression: worldgen, mobs, redstone, crafting, enchanting, brewing, villages, raids, and boss fights — implemented in **~45,000 lines of Swift** with **zero external dependencies**. No game engine, no .xcodeproj. The renderer is hand-written Metal, the audio engine synthesizes every sound from oscillators at runtime, and the game looks the way it does thanks to [Faithful 32x](https://faithfulpack.net) as its built-in texture set.
+**Pebble** is the open-source alternative to Minecraft: Java Edition — a native voxel survival game for macOS **and Windows**, with the full overworld/nether/end progression: worldgen, mobs, redstone, crafting, enchanting, brewing, villages, raids, and boss fights — implemented in **~45,000 lines of Swift** with **zero external dependencies**. No game engine, no .xcodeproj. The renderer is hand-written twice — Metal on macOS, Vulkan on Windows, from one shared simulation core — the audio engine synthesizes every sound from oscillators at runtime, and the game looks the way it does thanks to [Faithful 32x](https://faithfulpack.net) as its built-in texture set.
 
 Pebble is an original fan re-creation inspired by Minecraft: Java Edition 1.20. It is **not affiliated with, endorsed by, or connected to Mojang Studios or Microsoft** in any way, and contains no Mojang code or assets. Full statement in [Disclaimer](#disclaimer) below.
 
@@ -23,11 +23,62 @@ Pebble is an original fan re-creation inspired by Minecraft: Java Edition 1.20. 
 
 ## ⬇ Download
 
-**[Download Pebble for Mac — latest release](../../releases/latest)** — unzip, drag `Pebble.app` into your Applications folder, and launch. If macOS says it's from an unknown developer: **System Settings → Privacy & Security → "Open Anyway"** (the app is open source and built from exactly this code — you can also build it yourself with one command, see [Install](#install--run)).
+### **[→ Get Pebble — latest release](../../releases/latest)**
 
-Pebble is **macOS-only** (Apple silicon). The renderer is hand-written in Metal — Apple's graphics API — so Windows and Linux can't run it without a full renderer port.
+| | |
+|---|---|
+| **Windows** 10/11 (64-bit) | Download `Pebble-Windows.zip`, unzip anywhere, run **Pebble.exe**. |
+| **macOS** (Apple silicon) | Download `Pebble-macOS.zip`, unzip, drag **Pebble** into Applications. |
 
-> **Pebble 1.1.0 is a beta.** The engine is pinned by 512 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
+**The first launch shows a security warning on both platforms. That is expected** — neither build is code-signed, because signing needs a paid developer account on each platform. Each OS asks once:
+
+- **Windows:** "Windows protected your PC" → **More info** → **Run anyway**.
+- **macOS:** double-click Pebble, let it be refused, then **System Settings → Privacy & Security → "Open Anyway"**. Or in Terminal: `xattr -dr com.apple.quarantine ~/Downloads/Pebble.app`.
+
+Every zip ships a short text file with the same instructions. Prefer to build it yourself? One command: see [Install](#install--run).
+
+> **Pebble 1.1.0 is a beta.** The engine is pinned by 582 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
+
+## Sharing a build
+
+Tag a commit and GitHub Actions builds both platforms and publishes them:
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+That runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which produces `Pebble-Windows.zip` and `Pebble-macOS.zip` and attaches them to a new release with the download instructions above. You can also start it by hand from the Actions tab.
+
+### Getting rid of the warning
+
+A Pebble.app that travelled to another Mac gets stopped by Gatekeeper —
+"Apple could not verify this app is free of malware" — because the build is
+not notarized. That is Apple policy, not a broken download. Whoever receives
+it has two ways past it:
+
+- **Open Anyway.** Double-click Pebble and let macOS refuse it, then go to
+  System Settings → Privacy & Security, scroll to the bottom, and click
+  "Open Anyway". macOS asks once.
+- **One line in Terminal.** `xattr -dr com.apple.quarantine ~/Downloads/Pebble.app`
+  — or, from a checkout, `pebble fix ~/Downloads/Pebble.app`.
+
+`packaging/OPENING-ON-ANOTHER-MAC.txt` says the same thing in plain language
+and travels inside every `pebble release` zip.
+
+**To make it open with one click instead**, the build has to be signed with an
+Apple Developer ID and notarized, which needs a paid Apple Developer
+membership. Once you have one, Pebble already knows what to do:
+
+```bash
+export PEBBLE_SIGN_ID="Developer ID Application: Your Name (TEAMID)"
+xcrun notarytool store-credentials pebble --apple-id you@example.com --team-id TEAMID
+export PEBBLE_NOTARY_PROFILE=pebble
+./pebble release
+```
+
+That signs with a hardened runtime, submits to Apple, staples the ticket, and
+leaves a shareable zip in `dist/`. Without those two variables `pebble release`
+still builds the zip — it just warns that the result is not notarized.
 
 ## By the numbers
 

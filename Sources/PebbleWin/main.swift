@@ -15,6 +15,7 @@ import WinSDK
 import Foundation
 import PebbleCoreBase
 import CPebbleVulkan
+import CPebbleAudio
 
 let logFile = fopen("pebble-log.txt", "w")
 func plog(_ s: String) {
@@ -274,9 +275,26 @@ gUI = ui
 let hud = HUD()
 gHud = hud
 let host = WinHost()
+let detail = DetailView()
+let viewmodel = ViewmodelView()
+let audioOut = WinAudio()
 host.ui = ui
 host.hud = hud
 host.game = game
+host.detail = detail
+host.audio = audioOut
+
+// sound (PORTING module 10): the same synthesized engine the Mac runs, fed
+// to waveOut. A machine with no output device just stays quiet.
+if let err = audioOut.start(volumes: game.settings.volumes) {
+    plog("audio unavailable — playing silent: \(err)")
+} else {
+    plog("audio: waveOut at \(pb_audio_sample_rate()) Hz")
+}
+audioOut.synth.onSubtitle = { [weak hud] text in
+    guard game.settings.subtitles else { return }
+    hud?.pushSubtitle(text)
+}
 game.host = host
 let entityView = EntityView()
 if let n = cliName { game.settings.playerName = n }
@@ -318,8 +336,8 @@ platformLoadSkinBlob = { loadSkinBlob() }
 var terrainSlices: [[UInt8]]
 var terrainRes: Int
 let packPath = FileManager.default.currentDirectoryPath + "\\assets\\Faithful 32x - 1.20.1.zip"
-if let zipData = FileManager.default.contents(atPath: packPath),
-   let pack = buildPackTerrainAtlas(zip: zipData) {
+let packZip = FileManager.default.contents(atPath: packPath)
+if let zipData = packZip, let pack = buildPackTerrainAtlas(zip: zipData) {
     terrainSlices = pack.slices
     terrainRes = pack.res
     plog("textures: Faithful — \(pack.appliedTiles)/\(pack.slices.count) tiles at \(pack.res)×")
@@ -338,6 +356,65 @@ if flatAtlas.withUnsafeBufferPointer(
     exit(1)
 }
 plog("atlas ready — data root: \(vcSupportDir().path)")
+
+// the sky (PORTING 07 sky slice): the shared star field and cloud mask, plus
+// the pack's sun/moon art when it ships any. Without the art the sun and moon
+// fall back to the same procedural discs the Mac draws.
+let starField = pebStarField()
+if starField.withUnsafeBufferPointer({
+    pb_vk_upload_stars($0.baseAddress, Int32(PEB_STAR_COUNT)) }) != 0 {
+    plog("stars: \(String(cString: pb_vk_last_error()))")
+}
+let cloudMask = pebCloudTexture()
+if cloudMask.pixels.withUnsafeBufferPointer({
+    pb_vk_upload_sky_tex(2, $0.baseAddress, Int32(cloudMask.width), Int32(cloudMask.height)) }) != 0 {
+    plog("clouds: \(String(cString: pb_vk_last_error()))")
+}
+if let zipData = packZip {
+    for (slot, rel, what) in [(Int32(0), "environment/sun.png", "sun"),
+                              (Int32(1), "environment/moon_phases.png", "moon")] {
+        guard let img = packTexture(zip: zipData, rel: rel) else {
+            plog("sky: no \(what) art in the pack — procedural")
+            continue
+        }
+        if img.pixels.withUnsafeBufferPointer({
+            pb_vk_upload_sky_tex(slot, $0.baseAddress, Int32(img.width), Int32(img.height)) }) != 0 {
+            plog("sky \(what): \(String(cString: pb_vk_last_error()))")
+        }
+    }
+}
+
+entityView.packZip = packZip   // armour sheets, when the pack ships them
+
+/// hand the sky pass its environment — the same gates as the Mac's scene pass
+func pushSky(_ game: GameCore, _ cam: CamState, _ sky: PebSky) {
+    let w = game.world
+    let sun = pebSunDirection(sunAngle: w.sunAngle())
+    let overworld = w.dim == .overworld
+    let drawSky = !cam.underwater && !cam.underLava && cam.blindness < 0.5
+    let clouds = game.settings.clouds && overworld && !cam.underwater
+    let zen: [Float] = [sky.zenith.0, sky.zenith.1, sky.zenith.2]
+    let hor: [Float] = [sky.horizon.0, sky.horizon.1, sky.horizon.2]
+    let dir: [Float] = [sun.0, sun.1, sun.2]
+    zen.withUnsafeBufferPointer { z in
+        hor.withUnsafeBufferPointer { h in
+            dir.withUnsafeBufferPointer { s in
+                pb_vk_set_sky(drawSky ? 1 : 0, overworld ? 1 : 0,
+                              w.dim == .end ? 1 : 0, clouds ? 1 : 0,
+                              z.baseAddress, h.baseAddress, Float(sky.sunGlow), s.baseAddress,
+                              Float(w.rainLevel), Int32(w.time / 24000 % 8))
+            }
+        }
+    }
+}
+
+/// no world on screen (title, loading): the sky pass sits the frame out
+func silenceSky() {
+    let zero: [Float] = [0, 0, 0]
+    zero.withUnsafeBufferPointer { z in
+        pb_vk_set_sky(0, 0, 0, 0, z.baseAddress, z.baseAddress, 0, z.baseAddress, 0, 0)
+    }
+}
 resizeUI()
 
 // title art (the same PNGs the Mac bundles) from assets\ beside the exe
@@ -386,6 +463,7 @@ let t0 = monotonicNow()
 var lastFrame = t0
 var frames = 0
 var lastReport = t0
+var lastVolumePoll = t0
 var msg = MSG()
 
 mainLoop: while true {
@@ -419,6 +497,7 @@ mainLoop: while true {
 
     // camera + world + entities
     if game.hasWorld(), let p = game.player {
+        detail.particles.tick(game.world)
         let xi = p.prevX + (p.x - p.prevX) * partial
         let yi = p.prevY + (p.y - p.prevY) * partial
         let zi = p.prevZ + (p.z - p.prevZ) * partial
@@ -429,7 +508,8 @@ mainLoop: while true {
 
         // the SAME sky/day-light computation as the Mac — synced worlds
         // look identical at the same moment
-        let sky = pebSkyColors(game.world)
+        let cam = game.camState(partial, timeSec: now - t0)
+        let sky = pebSkyColors(game.world, nightVision: cam.nightVision)
         let dayLight = Float(sky.dayLight)
 
         let aspect = Float(max(1, resizedW)) / Float(max(1, resizedH))
@@ -442,14 +522,83 @@ mainLoop: while true {
             pb_vk_set_camera($0.baseAddress, xi, eyeY, zi,
                              Float(now - t0), dayLight, Float(game.settings.gamma), 0,
                              fogEnd * 0.65, fogEnd, 0.35,
-                             sky.horizon.0, sky.horizon.1, sky.horizon.2)
+                             sky.fog.0, sky.fog.1, sky.fog.2)
         }
+        pushSky(game, cam, sky)
+        // sun shadows: the same gate and the same texel-snapped matrix as the
+        // Mac (2048 is SHADOW_SIZE in the Vulkan backend)
+        let sun = pebSunDirection(sunAngle: game.world.sunAngle())
+        let shadowsOn = pebShadowsOn(game.world, settingOn: game.settings.shadows,
+                                     dayLight: sky.dayLight, sunDirY: sun.1)
+        if shadowsOn {
+            let sm = pebShadowMatrix(sunDir: sun, camX: xi, camY: eyeY, camZ: zi,
+                                     shadowSize: 2048)
+            sm.m.withUnsafeBufferPointer { pb_vk_set_shadow($0.baseAddress, 1) }
+        } else {
+            pb_vk_set_shadow(nil, 0)
+        }
+
+        // ultra (SSAO + volumetric light) — the Mac's "ultra" shader preset.
+        // The 256-byte block the pass marches through; off unless asked for.
+        if game.settings.shader == "ultra", let invVP = mat4fInverse(viewProj) {
+            let sm = shadowsOn
+                ? pebShadowMatrix(sunDir: sun, camX: xi, camY: eyeY, camZ: zi, shadowSize: 2048)
+                : Mat4f()
+            var block = [Float]()
+            block.reserveCapacity(64)
+            block.append(contentsOf: invVP.m)
+            block.append(contentsOf: viewProj.m)
+            block.append(contentsOf: sm.m)
+            block.append(contentsOf: [sun.0, sun.1, sun.2, dayLight])
+            block.append(contentsOf: [Float(now - t0), 800,           // time, far plane
+                                      shadowsOn && !cam.underwater ? 1 : 0,
+                                      cam.underwater ? 1 : 0])
+            block.append(contentsOf: [sky.fog.0, sky.fog.1, sky.fog.2,
+                                      Float(game.settings.renderDistance * 16)])
+            // the ultra target is half the swapchain in each axis
+            block.append(contentsOf: [2 / Float(max(1, resizedW)), 2 / Float(max(1, resizedH)), 0, 0])
+            block.withUnsafeBufferPointer { pb_vk_set_ultra(1, $0.baseAddress) }
+        } else {
+            pb_vk_set_ultra(0, nil)
+        }
+        // the composite's knobs — the same tints and the same bloom amount
+        // the Mac's composite pass uses
+        var tint: (Float, Float, Float, Float) = (0, 0, 0, 0)
+        if cam.underwater { tint = (0.1, 0.2, 0.45, 0.12) }
+        if cam.underLava { tint = (0.9, 0.3, 0.05, 0.55) }
+        if cam.powderSnow { tint = (0.95, 0.97, 1.0, 0.5) }
+        pb_vk_set_post(game.settings.bloom ? 0.55 : 0,
+                       game.settings.reduceMotion ? 0 : Float(cam.portalWarp),
+                       Float(now - t0), Float(cam.darkness),
+                       tint.0, tint.1, tint.2, tint.3)
+        detail.pushLines(game, xi, eyeY, zi, partial: partial)
+        detail.pushOverlays(game, camX: xi, camY: eyeY, camZ: zi, partial: partial)
+        // the billboard basis comes from the camera, not the player — the same
+        // source the Mac uses, so third person stays correct when it lands
+        detail.pushParticles(camX: xi, camY: eyeY, camZ: zi, yaw: cam.yaw, pitch: cam.pitch)
+        detail.pushSprites(game, camX: xi, camY: eyeY, camZ: zi, yaw: cam.yaw,
+                           dayLight: sky.dayLight, partial: partial)
         entityView.frame(game: game, camX: xi, camY: eyeY, camZ: zi,
-                         dayLight: dayLight, partial: partial)
+                         dayLight: dayLight, partial: partial, timeSec: now - t0)
+        // the hand goes last, over everything, on the projection alone
+        viewmodel.frame(game: game, proj: proj, dayLight: dayLight)
         drawUIFrame(ui, hud, game)
-        _ = pb_vk_frame(sky.zenith.0, sky.zenith.1, sky.zenith.2)
+        // the Mac clears its scene pass to the fog colour and paints the sky
+        // dome over it; where the dome sits out a frame (underwater, lava,
+        // blindness) this clear IS the backdrop, exactly as on the Mac
+        _ = pb_vk_frame(sky.fog.0, sky.fog.1, sky.fog.2)
     } else {
         pb_vk_begin_entities()
+        silenceSky()
+        pb_vk_begin_lines()
+        pb_vk_begin_viewmodel()
+        pb_vk_set_post(0, 0, 0, 0, 0, 0, 0, 0)   // no post on the title screen
+        pb_vk_set_shadow(nil, 0)
+        pb_vk_set_ultra(0, nil)
+        pb_vk_clear_overlay_mesh(0)
+        pb_vk_clear_overlay_mesh(1)
+        pb_vk_set_particles(nil, 0, nil, nil)
+        pb_vk_set_sprites(nil, 0, nil)
         // the Mac's title backdrop: cover-fit photo + the wordmark on top
         // the canvas draws in PIXEL space (beginFrame scales GUI→px), so
         // image quads take pixel coordinates too
@@ -482,6 +631,13 @@ mainLoop: while true {
         _ = pb_vk_frame(0.02, 0.02, 0.05)   // the Mac's title clear color
     }
 
+    // the Mac re-reads the volume sliders once a second; match that so a
+    // change in Options takes effect while the screen is still open
+    if now - lastVolumePoll >= 1 {
+        lastVolumePoll = now
+        audioOut.synth.applyVolumes(game.settings.volumes)
+    }
+
     frames += 1
     if now - lastReport >= 5 {
         let p = game.player
@@ -496,6 +652,7 @@ mainLoop: while true {
 
 plog("closing — saving…")
 game.exitToTitle()
+audioOut.stop()
 pb_vk_destroy()
 plog("clean exit")
 

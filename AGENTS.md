@@ -12,7 +12,7 @@ Owner: **Xavi** — a young Dutch hobbyist. Explain things to him **simply and i
 
 **2026-07-12 — the Windows client is a real, playable Pebble.** It boots the actual Pebble UI (title screen, options, multiplayer/direct-connect lobby), renders terrain with Faithful textures, draws mobs and other players, streams chunks, takes input, and joins Mac-hosted worlds over direct IP. Both CI lanes are green. Known gaps on Windows: no audio (PORTING 10), entities are in bind pose (no animator yet — that still lives Apple-side in `EntityRendererM`), no shadows/bloom/ultra, no first-person viewmodel.
 
-macOS is unchanged and remains the default release path: same app, same saves, same 550 green checks.
+macOS is unchanged and remains the default release path: same app, same saves, same 559 green checks.
 
 ## Where things live
 
@@ -22,10 +22,11 @@ macOS is unchanged and remains the default release path: same app, same saves, s
 | `PebbleCore` | Apple-side runtime: `GameCore` orchestration, SQLite `SaveDB`, Network.framework/Bonjour adapter, `MathXApple` (simd/Mat4/Frustum). Re-exports Base via `Reexport.swift`. | macOS |
 | `Pebble` | The macOS app: AppKit shell, Metal renderer, AVFoundation audio, gear/entity renderers. | macOS |
 | `PebbleWin` | The Windows client: Win32 window + message pump, input, lobby, host bridge, entity/UI views. | Windows |
-| `CPebbleVulkan` | Vulkan renderer behind a `pb_vk_*` C ABI; loads `vulkan-1.dll` at runtime (no SDK needed). Embedded SPIR-V in `shaders_spv.h`. | Windows (stubs elsewhere) |
+| `CPebbleVulkan` | Vulkan renderer behind a `pb_vk_*` C ABI; loads `vulkan-1.dll` at runtime (no SDK needed). Embedded SPIR-V in `shaders_spv.h` — edit `shaders/*.vert|frag`, recompile with `glslangValidator -V --target-env vulkan1.0`, then `python3 shaders/embed.py`. The `.spv` files are checked in, so a build never needs the compiler. | Windows (stubs elsewhere) |
+| `CPebbleAudio` | Audio sink behind a `pb_audio_*` C ABI: winmm's waveOut (plain C, no COM, no SDK). Pebble synthesizes every sound, so a platform only hands over finished stereo samples. | Windows (stubs elsewhere) |
 | `CSQLite` / `CCodecs` | Project-owned SQLite, lodepng + miniz — same engine/codecs on every platform. | all |
 | `PebbleSmokeKit` | The shared golden suites both smoke runners execute. | all |
-| `pebsmoke` / `pebsmokecore` | macOS full suite (550) / portable suite (516). | macOS / all |
+| `pebsmoke` / `pebsmokecore` | macOS full suite (559) / portable suite (525). | macOS / all |
 | `pebserver` | Headless SMP server: 20 TPS, no host player, direct IP everywhere, Bonjour on macOS. | all |
 
 ## Rules that must not break
@@ -44,8 +45,8 @@ macOS is unchanged and remains the default release path: same app, same saves, s
 ```
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
-swift run pebsmoke                # macOS: 550 checks (self-assigns a temp data root)
-swift run pebsmokecore            # portable: 516 checks, runs anywhere
+swift run pebsmoke                # macOS: 559 checks (self-assigns a temp data root)
+swift run pebsmokecore            # portable: 525 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server
 ```

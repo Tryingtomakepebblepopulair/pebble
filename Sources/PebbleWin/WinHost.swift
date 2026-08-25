@@ -18,6 +18,8 @@ func sectionKey(_ cx: Int, _ sy: Int, _ cz: Int) -> UInt64 {
 final class WinHost: GameHost {
     var ui: UIManager!
     var hud: HUD!
+    var detail: DetailView!
+    var audio: WinAudio!
     weak var game: GameCore?
     /// uploaded sections by chunk — feeds the loading screen's progress
     private var meshedByChunk: [Int64: Set<Int>] = [:]
@@ -128,16 +130,34 @@ final class WinHost: GameHost {
     func setBossBars(_ bars: [BossBarInfo]) { hud.bossBars = bars }
 
     // ---- audio: module 10 — silent for now -----------------------------------
-    func playSound(_ name: String, _ x: Double, _ y: Double, _ z: Double, _ volume: Double, _ pitch: Double) {}
-    func playUI(_ name: String) {}
-    func setAudioEnvironment(_ underwater: Bool, _ caveFactor: Double) {}
-    func setAudioListener(_ x: Double, _ y: Double, _ z: Double, _ yaw: Double) {}
-    func tickMusic(_ mood: String, _ enabled: Bool) {}
-    func stopDisc() {}
+    func playSound(_ name: String, _ x: Double, _ y: Double, _ z: Double, _ volume: Double, _ pitch: Double) {
+        // jukebox discs get their own voice class so stopDisc can cut them
+        // (the same prefix and the same full name the Mac hands over)
+        if name.hasPrefix("jukebox.play.") {
+            audio?.synth.playDisc(name, x, y, z)
+            return
+        }
+        audio?.synth.play(name, x, y, z, volume, pitch)
+    }
+    func playUI(_ name: String) { audio?.synth.playUI(name) }
+    func setAudioEnvironment(_ underwater: Bool, _ caveFactor: Double) {
+        audio?.synth.setEnvironment(underwater, caveFactor)
+    }
+    func setAudioListener(_ x: Double, _ y: Double, _ z: Double, _ yaw: Double) {
+        audio?.synth.setListener(x, y, z, yaw)
+    }
+    func tickMusic(_ mood: String, _ enabled: Bool) { audio?.synth.tickMusic(mood, enabled) }
+    func stopDisc() { audio?.synth.stopDisc() }
 
     // ---- particles: later renderer slice --------------------------------------
-    func addParticles(_ type: String, _ x: Double, _ y: Double, _ z: Double, _ count: Int, _ spread: Double, _ cell: Int) {}
-    func spawnPrecipitation(_ kind: String, _ x: Double, _ y: Double, _ z: Double, _ groundY: Double) {}
+    func addParticles(_ type: String, _ x: Double, _ y: Double, _ z: Double, _ count: Int, _ spread: Double, _ cell: Int) {
+        guard let game else { return }
+        detail?.particles.spawn(game.world, type, x, y, z, count, spread, cell: cell)
+    }
+    func spawnPrecipitation(_ kind: String, _ x: Double, _ y: Double, _ z: Double, _ groundY: Double) {
+        guard let game else { return }
+        detail?.particles.spawn(game.world, kind, x, y, z, 1, 0.1, groundY: groundY)
+    }
 }
 
 #endif

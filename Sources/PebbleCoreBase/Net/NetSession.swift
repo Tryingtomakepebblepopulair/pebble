@@ -473,6 +473,12 @@ public final class NetHostSession {
         }
         p.elytraFlying = s.flags & 64 != 0
         p.health = Double(min(s.health, Float(p.maxHealth)))
+        // A guest reporting less health than last tick already knows why —
+        // it applied that damage itself. Without moving the watermark down
+        // with it, the host reads its own mirror as fresh damage and sends it
+        // straight back, and the echo drains the guest a point per tick until
+        // it dies. Only a drop the HOST causes between ticks should travel.
+        if p.health < g.lastHealth { g.lastHealth = p.health }
         p.dead = false   // guests handle their own death/respawn
         if s.heldId >= 0 && s.heldId < Int32(itemDefs.count) {
             if p.mainHand?.id != Int(s.heldId) || p.mainHand?.damage != Int(s.heldMeta) {

@@ -44,8 +44,11 @@ int pb_vk_upload_entity_geom(int geomId, const void* verts, int vertCount,
 
 // rebuild the per-frame entity draw list (call once, then push visible ones)
 void pb_vk_begin_entities(void);
-// model16 is column-major, camera-relative translation; mvp is computed here
-void pb_vk_push_entity(int geomId, const float* model16, float brightness, float alpha);
+// model16 is column-major, camera-relative translation; mvp is computed here.
+// parts24 is the posed rig: 24 column-major 4x4s (384 floats) indexed by the
+// vertex stream's part id — pass NULL for the bind pose.
+void pb_vk_push_entity(int geomId, const float* model16, float brightness, float alpha,
+                       const float* parts24);
 
 // camera + environment for the next frames; after the first call,
 // pb_vk_frame(r,g,b) clears to the sky AND draws every live section
@@ -54,6 +57,97 @@ void pb_vk_set_camera(const float* viewProj16,
                       float time, float dayLight, float gammaB, float ambient,
                       float fogStart, float fogEnd, float alphaTest,
                       float fogR, float fogG, float fogB);
+
+// sky, stars, sun/moon and clouds (PORTING module 07 sky slice).
+// Call pb_vk_set_sky once per frame AFTER pb_vk_set_camera: the star fade,
+// the cloud scroll and the cloud fade all read the day-light/time/fog that
+// call installs. drawSky 0 leaves the frame's clear colour showing (the
+// Mac's underwater/lava/blindness path); stars, sun/moon and clouds are
+// drawn only when overworld is non-zero. dayPhase is world.time/24000 % 8.
+void pb_vk_set_sky(int drawSky, int overworld, int endDim, int drawClouds,
+                   const float* zenith3, const float* horizon3,
+                   float sunGlow, const float* sunDir3,
+                   float rainLevel, int dayPhase);
+
+// the star field: the Mac's 16-byte stream (vec3 unit direction + float
+// magnitude), one entry per star. Call once after create; re-uploading
+// replaces the set, count 0 removes it.
+int pb_vk_upload_stars(const void* verts, int count);
+
+// optional pack art for the sky — 0 sun, 1 moon phase sheet (4x2 grid),
+// 2 cloud noise (the red channel is the mask). Straight RGBA8, first
+// upload wins. Without it the sun and moon fall back to the same
+// procedural discs the Mac draws, and the cloud plane is skipped.
+int pb_vk_upload_sky_tex(int which, const unsigned char* rgba, int w, int h);
+
+// world detail (PORTING module 07 detail slice) — all three are per-frame
+// streams: set them after pb_vk_set_camera, before pb_vk_frame. Passing
+// count 0 (or never calling them) skips the pass for that frame.
+
+// flat-coloured geometry: the block-selection outline (line list) and the
+// blob shadows under entities (triangle list). Positions are camera-relative
+// float3. Call begin once per frame, then push one batch per colour.
+void pb_vk_begin_lines(void);
+void pb_vk_push_lines(const float* verts, int vertCount, int tris,
+                      float r, float g, float b, float a);
+
+// extra chunk-stream meshes drawn with the terrain pipelines and atlas:
+// slot 0 the falling-block/TNT cubes (pass 0, opaque), slot 1 the
+// block-break crack overlay (pass 2, translucent). Same frozen 28-byte
+// stream as a section; re-uploading a slot replaces it.
+int pb_vk_set_overlay_mesh(int slot, int pass, float alphaTest,
+                           double ox, double oy, double oz,
+                           const void* verts, int vertCount,
+                           const unsigned int* indices, int indexCount);
+void pb_vk_clear_overlay_mesh(int slot);
+
+// the first-person viewmodel: the same entity geometry registry, but drawn
+// last with no depth test and the PROJECTION only — the arm and the held
+// item are already in view space.
+void pb_vk_set_viewmodel_proj(const float* proj16);
+void pb_vk_begin_viewmodel(void);
+void pb_vk_push_viewmodel(int geomId, const float* model16, float brightness, float alpha);
+
+// particles in the Mac's 48-byte instance stream (pos3, uvRect4,
+// tile*256+size*100, rgb+light), plus the camera's right/up basis
+void pb_vk_set_particles(const void* instances, int count,
+                         const float* right3, const float* up3);
+
+// item / projectile billboards: 36-byte instances (center3, size, uvRect4,
+// light) sampled from the icon atlas below
+void pb_vk_set_sprites(const void* instances, int count, const float* right3);
+
+// the 2048x512 item-icon atlas: stream 16x16 cells as slots get assigned.
+// Returns -1 when the frame's rect queue is full — retry the cell next
+// frame rather than leaving that slot permanently blank.
+int pb_vk_sprite_atlas_update(int x, int y, int w, int h, const unsigned char* rgba);
+
+// post-processing (PORTING module 07 post slice): the world renders into an
+// offscreen target, a half-res bloom chain runs over it, and one fullscreen
+// triangle composites the result into the swapchain with the UI on top.
+// These are the composite's knobs — the Mac's CompositeUniforms minus the
+// `ultra` terms this backend has no pass for. If the offscreen targets fail
+// to build, the frame falls back to drawing straight into the swapchain and
+// these are ignored.
+void pb_vk_set_post(float bloomAmt, float warp, float time, float darkness,
+                    float tintR, float tintG, float tintB, float tintA);
+
+// sun shadows: a depth-only pass over every opaque and cutout section from
+// the sun's side, sampled back in the terrain shader. shadowMat16 is the
+// sun's view-projection (column-major, camera-relative, same convention as
+// the camera matrix). enabled 0 skips the pass and the sampling entirely —
+// the Mac gates it on the shadows setting, the dimension, the daylight and
+// the sun's height.
+void pb_vk_set_shadow(const float* shadowMat16, int enabled);
+
+// ultra (SSAO + volumetric light) — the Mac's "ultra" shader preset. block64
+// is the 256-byte uniform: invViewProj, viewProj and shadowMat (16 floats
+// each, column-major, camera-relative), then sunDir+dayLight, params
+// (time, far, shadowOK, underwater), fogColor+renderDistance, and the
+// target's texel size. `on` 0 skips the pass entirely. If the backend could
+// not build the ultra targets this call is a no-op and the composite's ultra
+// branch stays off.
+void pb_vk_set_ultra(int on, const float* block64);
 
 // UI images (title photo/wordmark): register once, push quads per frame
 // (GUI units + UV rect) — drawn UNDER the canvas verts, linear-filtered

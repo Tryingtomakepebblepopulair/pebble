@@ -213,6 +213,16 @@ private func packTexPrefix(_ zip: Data) -> String? {
     return nil
 }
 
+/// one texture out of a resource-pack ZIP by its textures/-relative path
+/// ("environment/sun.png"), nested-zip tolerant like the atlas builder.
+/// Returns nil when the pack does not ship it — callers fall back to their
+/// procedural art.
+public func packTexture(zip: Data, rel: String) -> PebImage? {
+    guard let prefix = packTexPrefix(zip),
+          let d = pebZipExtract(zip, name: prefix + rel) else { return nil }
+    return pebDecodePNG(d)
+}
+
 public struct PackTerrainAtlas {
     public let res: Int
     public let slices: [[UInt8]]

@@ -139,7 +139,36 @@ bundle() {
     # the Faithful license must travel with the pack (their requirement #6)
     cp "$REPO/packaging/FAITHFUL-LICENSE.txt" "$stage/Contents/Resources/" 2>/dev/null || true
     cp "$REPO/.build/release/Pebble"    "$stage/Contents/MacOS/Pebble"
-    codesign --force --sign - "$stage" >/dev/null 2>&1 || warn "codesign failed — the app may trip Gatekeeper"
+    sign_app "$stage"
+}
+
+# Signing decides what happens on someone else's Mac.
+#
+#   ad-hoc (the default)  the app runs fine where it was BUILT, but a copy
+#                         that travelled over the internet is quarantined and
+#                         Gatekeeper refuses it: "Apple could not verify ...".
+#   Developer ID          signed with a paid Apple Developer certificate and
+#                         notarized by Apple, it opens with one click anywhere.
+#
+# Set PEBBLE_SIGN_ID to a Developer ID Application identity to get the second
+# one; otherwise this falls back to ad-hoc and says so.
+sign_app() {
+    local target="$1"
+    local id="${PEBBLE_SIGN_ID:-}"
+    if [ -z "$id" ]; then
+        # one in the keychain is as good as one in the environment
+        id="$(security find-identity -v -p codesigning 2>/dev/null \
+              | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"' || true)"
+    fi
+    if [ -n "$id" ]; then
+        say "Signing with ${id}…"
+        codesign --force --deep --options runtime --timestamp \
+                 --sign "$id" "$target" \
+            || die "codesign failed with identity: $id"
+        return
+    fi
+    codesign --force --sign - "$target" >/dev/null 2>&1 \
+        || warn "codesign failed — the app may not launch at all on Apple silicon"
 }
 
 deploy() {
@@ -172,6 +201,48 @@ cmd_install() {
     say "Done. Launch with:  pebble run   (or open ~/Applications/$APP_NAME.app)"
 }
 
+# Hand someone a Pebble.app they downloaded and macOS will refuse it, because
+# the build is not notarized by Apple. This clears the quarantine flag on a
+# copy the user already has — the same thing Apple's own "Open Anyway" button
+# does, minus the hunt through System Settings.
+cmd_fix() {
+    local target="${2:-$APP}"
+    [ -e "$target" ] || die "no app at $target — pass the path, e.g. pebble fix ~/Downloads/Pebble.app"
+    if ! xattr -l "$target" 2>/dev/null | grep -q com.apple.quarantine; then
+        say "$target is not quarantined — it should open normally."
+        return
+    fi
+    say "Clearing the download quarantine on $target…"
+    xattr -dr com.apple.quarantine "$target"
+    say "Done. Open it the usual way."
+}
+
+# Build a release anyone can download. With a Developer ID in PEBBLE_SIGN_ID
+# and a notarytool keychain profile in PEBBLE_NOTARY_PROFILE it comes out
+# notarized and stapled, which is the only way an app opens on someone else's
+# Mac without them touching a security setting.
+cmd_release() {
+    need_swift
+    build
+    bundle
+    local out="$REPO/dist/$APP_NAME-macOS.zip"
+    if [ -n "${PEBBLE_NOTARY_PROFILE:-}" ]; then
+        say "Notarizing (this takes a few minutes)…"
+        ditto -c -k --keepParent "$REPO/dist/$APP_NAME.app" "$out"
+        xcrun notarytool submit "$out" --keychain-profile "$PEBBLE_NOTARY_PROFILE" --wait \
+            || die "notarization failed — check the log with: xcrun notarytool log"
+        xcrun stapler staple "$REPO/dist/$APP_NAME.app" || die "stapling failed"
+        rm -f "$out"
+    else
+        warn "PEBBLE_NOTARY_PROFILE is not set — this build is NOT notarized."
+        warn "Whoever downloads it will have to allow it in System Settings once."
+        warn "See 'Sharing a build' in README.md."
+    fi
+    cp "$REPO/packaging/OPENING-ON-ANOTHER-MAC.txt" "$REPO/dist/" 2>/dev/null || true
+    ditto -c -k --keepParent "$REPO/dist/$APP_NAME.app" "$out"
+    say "Release at $out"
+}
+
 cmd_update() {
     [ -d "$REPO/.git" ] || die "$REPO is not a git checkout — 'pebble update' needs one (re-clone from GitHub, or just run: pebble install)"
     say "Pulling latest…"
@@ -189,6 +260,8 @@ case "${1:-}" in
     run)     cmd_run ;;
     test)    cmd_test ;;
     serve)   cmd_serve "$@" ;;
+    fix)     cmd_fix "$@" ;;
+    release) cmd_release ;;
     *)
         echo "${BOLD}pebble${RESET} — one-command install for the Pebble app"
         echo
@@ -197,5 +270,7 @@ case "${1:-}" in
         echo "  pebble run          launch Pebble"
         echo "  pebble test         run the golden test suite"
         echo "  pebble serve        run a world as a standalone server (SMP) — try: pebble serve --help"
+        echo "  pebble fix [path]   macOS refusing a downloaded Pebble.app? this unblocks it"
+        echo "  pebble release      build a shareable .zip (notarized if configured)"
         ;;
 esac
