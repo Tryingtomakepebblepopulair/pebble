@@ -242,6 +242,7 @@ final class WorldRenderer {
     var shadowTexture: MTLTexture!
     var shadowSampler: MTLSamplerState!
     var cloudTexture: MTLTexture!
+    var cloudSampler: MTLSamplerState!
     var starsBuffer: MTLBuffer!
     var starCount = 0
 
@@ -455,6 +456,14 @@ final class WorldRenderer {
         ld.sAddressMode = .clampToEdge
         ld.tAddressMode = .clampToEdge
         linearSampler = device.makeSamplerState(descriptor: ld)
+        // the cloud plane samples the mask at uv*12 — it has to wrap, or all
+        // but the first twelfth of the sky is a smear of the texture's edge
+        let cd = MTLSamplerDescriptor()
+        cd.minFilter = .linear
+        cd.magFilter = .linear
+        cd.sAddressMode = .repeat
+        cd.tAddressMode = .repeat
+        cloudSampler = device.makeSamplerState(descriptor: cd)
     }
 
     // ---- atlas install (procedural / resource pack) ------------------------------
@@ -623,53 +632,26 @@ final class WorldRenderer {
     }
 
     private func buildClouds() {
-        // blobby cellular clouds, wrapping — pattern pinned by the baselines
-        let size = 128
-        var px = [UInt8](repeating: 0, count: size * size * 4)
-        for y in 0..<size {
-            for x in 0..<size {
-                var v = 0.0
-                for (s, w) in [(8, 0.55), (16, 0.3), (32, 0.15)] {
-                    let cellW = size / s
-                    let gx = x / cellW, gy = y / cellW
-                    let fx = Double(x % cellW) / Double(cellW), fy = Double(y % cellW) / Double(cellW)
-                    func h(_ a: Int, _ b: Int) -> Double {
-                        Double(hash2(31337, ((a % s) + s) % s, ((b % s) + s) % s, UInt32(s))) / 4294967296.0
-                    }
-                    let v00 = h(gx, gy), v10 = h(gx + 1, gy), v01 = h(gx, gy + 1), v11 = h(gx + 1, gy + 1)
-                    let sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy)
-                    v += ((v00 * (1 - sx) + v10 * sx) * (1 - sy) + (v01 * (1 - sx) + v11 * sx) * sy) * w
-                }
-                let on: UInt8 = v > 0.56 ? 255 : 0
-                let i = (y * size + x) * 4
-                px[i] = on; px[i + 1] = on; px[i + 2] = on; px[i + 3] = 255
-            }
-        }
-        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: size, height: size, mipmapped: false)
+        // blobby cellular clouds, wrapping — pattern pinned by the baselines,
+        // shared with the Vulkan backend (PebbleCoreBase/Render/SkyGeometry)
+        let img = pebCloudTexture()
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,
+                                                          width: img.width, height: img.height,
+                                                          mipmapped: false)
         td.usage = .shaderRead
         cloudTexture = device.makeTexture(descriptor: td)!
-        px.withUnsafeBytes { raw in
-            cloudTexture.replace(region: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0,
-                                 withBytes: raw.baseAddress!, bytesPerRow: size * 4)
+        img.pixels.withUnsafeBytes { raw in
+            cloudTexture.replace(region: MTLRegionMake2D(0, 0, img.width, img.height), mipmapLevel: 0,
+                                 withBytes: raw.baseAddress!, bytesPerRow: img.width * 4)
         }
     }
 
     private func buildClouds_sampler() {}
 
     private func buildStars() {
-        let N = 1300
-        var data = [Float](repeating: 0, count: N * 4)
-        for i in 0..<N {
-            let u = Double(hash2(777, i, 0)) / 4294967296.0
-            let v = Double(hash2(777, i, 1)) / 4294967296.0
-            let theta = u * .pi * 2
-            let phi = Foundation.acos(2 * v - 1)
-            data[i * 4] = Float(Foundation.sin(phi) * Foundation.cos(theta))
-            data[i * 4 + 1] = Float(Foundation.cos(phi))
-            data[i * 4 + 2] = Float(Foundation.sin(phi) * Foundation.sin(theta))
-            data[i * 4 + 3] = Float(Double(hash2(777, i, 2)) / 4294967296.0)
-        }
-        starCount = N
+        // the shared field — same directions and magnitudes on Vulkan
+        let data = pebStarField()
+        starCount = PEB_STAR_COUNT
         starsBuffer = data.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
     }
 
@@ -835,28 +817,24 @@ final class WorldRenderer {
             fogColor = SIMD3<Float>(0, 0, 0)
         }
 
-        let angle = world.sunAngle()
-        let sunDir = SIMD3<Float>(Float(-Foundation.sin(angle * .pi * 2 + .pi)), Float(Foundation.cos(angle * .pi * 2)), 0.18)
-        let shadowOK = settings.shadows && world.dim == .overworld && sky.dayLight > 0.1 && sunDir.y > 0.05
+        let sd = pebSunDirection(sunAngle: world.sunAngle())
+        let sunDir = SIMD3<Float>(sd.0, sd.1, sd.2)
+        let shadowOK = pebShadowsOn(world, settingOn: settings.shadows,
+                                    dayLight: sky.dayLight, sunDirY: sunDir.y)
 
         var shadowMat = matrix_identity_float4x4
         var lightViewM = matrix_identity_float4x4
         var lightProjM = matrix_identity_float4x4
         // --- shadow pass ---
         if shadowOK {
-            let r: Float = 72
+            let r: Float = 72   // the ortho half-extent, also the cull radius below
             let lightView = mat4LookDir(eye: sunDir * 120, dir: -sunDir, up: SIMD3<Float>(0, 1, 0))
-            let lightProj = mat4Ortho(l: -r, r: r, b: -r, t: r, n: 1, f: 320)
-            shadowMat = lightProj * lightView
-            // texel snap: pin the shadow grid to the world, not the camera —
-            // continuous sub-texel drift while moving reads as edge shimmer
-            let worldAnchor = SIMD4<Float>(Float(-cam.x), Float(-cam.y), Float(-cam.z), 1)
-            let anchorClip = shadowMat * worldAnchor
-            let texel = 2 / Float(shadowSizeNow)
-            var snap = matrix_identity_float4x4
-            snap.columns.3.x = -anchorClip.x.truncatingRemainder(dividingBy: texel)
-            snap.columns.3.y = -anchorClip.y.truncatingRemainder(dividingBy: texel)
-            shadowMat = snap * shadowMat
+            let lightProj = mat4Ortho(l: -72, r: 72, b: -72, t: 72, n: 1, f: 320)
+            // the matrix itself, texel snap and all, is shared with the
+            // Vulkan client
+            shadowMat = simd_float4x4(pebShadowMatrix(
+                sunDir: (sunDir.x, sunDir.y, sunDir.z),
+                camX: cam.x, camY: cam.y, camZ: cam.z, shadowSize: shadowSizeNow))
             lightViewM = lightView
             lightProjM = lightProj
             let spd = MTLRenderPassDescriptor()
@@ -1065,7 +1043,7 @@ final class WorldRenderer {
             enc.setVertexBytes(&cu, length: MemoryLayout<CloudUniforms>.stride, index: 1)
             enc.setFragmentBytes(&cu, length: MemoryLayout<CloudUniforms>.stride, index: 1)
             enc.setFragmentTexture(cloudTexture, index: 0)
-            enc.setFragmentSamplerState(linearSampler, index: 0)
+            enc.setFragmentSamplerState(cloudSampler, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
             enc.setCullMode(.back)
         }
@@ -1240,17 +1218,6 @@ final class WorldRenderer {
         let maxD = game.settings.entityDistance * game.settings.entityDistance
         // contact (blob) shadows: a flat dark disc projected onto the ground
         // under each living entity, drawn just before its model.
-        func groundYUnder(_ x: Double, _ feetY: Double, _ z: Double) -> Double? {
-            let bx = ifloorD(x), bz = ifloorD(z)
-            var y = ifloorD(feetY + 0.05)
-            var steps = 0
-            while steps < 24 {
-                let id = w.getBlock(bx, y, bz) >> 4
-                if id > 0 && id < blockDefs.count && blockDefs[id].solid { return Double(y + 1) }
-                y -= 1; steps += 1
-            }
-            return nil
-        }
         for e in w.entities {
             if e.dead { continue }
             guard let ent = e as? Entity else { continue }
@@ -1266,34 +1233,12 @@ final class WorldRenderer {
             let yaw = ent.prevYaw + wrapAngleD(ent.yaw - ent.prevYaw) * partial
             let bx = ifloorD(ent.x), by = ifloorD(ent.y + ent.height * 0.5), bz = ifloorD(ent.z)
             let deathFlip = (liv?.deathTime ?? 0) > 0 ? min(1.0, Double(liv!.deathTime) / 20) : 0
-            var pose = EntityPose()
-            pose.x = ix; pose.y = iy; pose.z = iz
-            pose.yaw = yaw
-            pose.headYaw = liv != nil ? wrapAngleD(liv!.headYaw - yaw) : 0
-            pose.pitch = ent.pitch
-            pose.limbSwing = liv?.limbSwing ?? 0
-            pose.limbAmp = liv?.limbAmp ?? 0
-            pose.attackSwing = liv?.attackAnim ?? 0
-            pose.hurtFlash = (liv?.hurtTime ?? 0) > 0 ? Double(liv!.hurtTime) / 10 : deathFlip * 0.6
-            pose.scale = 1
-            pose.baby = ent.data.baby ?? false
-            pose.sky = w.getSkyLight(bx, by, bz)
-            pose.block = w.getBlockLight(bx, by, bz)
-            pose.ageTicks = ent.age
-            pose.airborne = !ent.onGround
-            pose.aiming = (ent as? Mob)?.target != nil
-            pose.crossed = pose.aiming
-            pose.grazing = ent.data.grazing ?? false
-            pose.sitting = (ent as? Mob)?.sitting ?? false
-            pose.open = (ent as? Shulker)?.peekAmount ?? 0
-            pose.hanging = ent.type == "bat" && ent.onGround
-            pose.alpha = deathFlip > 0 ? 1 - deathFlip * 0.6 : 1
-            if let pl = ent as? Player, pl.isBlocking() {
-                pose.blockingHand = pl.useItemHand
-            }
+            // the pose itself is shared with the Vulkan client
+            let pose = pebEntityPose(w, ent, partial: partial)
+
             // blob shadow under living entities (incl. the player in 3rd person);
             // fade out as the entity rises above the ground beneath it.
-            if liv != nil, let gy = groundYUnder(ix, iy, iz), iy - gy <= 6 {
+            if liv != nil, let gy = pebGroundYUnder(w, ix, iy, iz), iy - gy <= 6 {
                 let fade = Float(max(0, 1 - (iy - gy) / 6))
                 drawBlobShadow(enc, viewProj, ix - camPos.x, gy + 0.015 - camPos.y, iz - camPos.z,
                                ent.width * 0.5 + 0.18, 0.34 * fade)
@@ -1341,17 +1286,7 @@ final class WorldRenderer {
                                 _ sx: Double, _ sy: Double, _ sz: Double,
                                 _ r: Double, _ alpha: Float) {
         if alpha <= 0.01 { return }
-        let seg = 14
-        var verts: [Float] = []
-        let cy = Float(sy), cx = Float(sx), cz = Float(sz)
-        for s in 0..<seg {
-            let a0 = Double(s) / Double(seg) * .pi * 2
-            let a1 = Double(s + 1) / Double(seg) * .pi * 2
-            let x0 = Float(sx + cos(a0) * r), z0 = Float(sz + sin(a0) * r)
-            let x1 = Float(sx + cos(a1) * r), z1 = Float(sz + sin(a1) * r)
-            verts.append(contentsOf: [cx, cy, cz, x0, cy, z0, x1, cy, z1])
-            verts.append(contentsOf: [cx, cy, cz, x1, cy, z1, x0, cy, z0])
-        }
+        let verts = pebBlobShadowDisc(sx, sy, sz, r)
         var u = LineUniforms(viewProj: viewProj, color: SIMD4<Float>(0, 0, 0, alpha))
         enc.setRenderPipelineState(linePipeline)
         enc.setDepthStencilState(depthRead)
@@ -1383,45 +1318,7 @@ final class WorldRenderer {
                              camPos: SIMD3<Double>, cam: CamState, dayLight: Double,
                              fog: (SIMD3<Float>, Float, Float), partial: Double) {
         let w = game.world
-        let spriteMap: [String: String] = [
-            "snowball": "snowball", "egg": "egg", "ender_pearl": "ender_pearl", "xp_bottle": "experience_bottle",
-            "thrown_potion": "splash_potion", "firework": "firework_rocket", "eye_of_ender": "ender_eye",
-            "fishing_bobber": "string", "wither_skull": "wither_skeleton_skull_item", "dragon_fireball": "fire_charge",
-            "fireball": "fire_charge", "shulker_bullet": "shulker_shell", "llama_spit": "snowball",
-        ]
-        var items: [(x: Double, y: Double, z: Double, slot: Int, size: Double, bob: Double, light: Double, emissive: Double)] = []
-        for e in w.entities {
-            if e.dead { continue }
-            guard let ent = e as? Entity else { continue }
-            var stack: ItemStack? = nil
-            var size = 0.45
-            var emissive = 0.0
-            if ent.type == "item" {
-                stack = (ent as? ItemEntity)?.stack
-            } else if ent.type == "xp_orb" {
-                stack = ItemStack(iid("experience_bottle"), 1)
-                size = 0.3
-                emissive = 1
-            } else if SPRITE_TYPES.contains(ent.type) {
-                let id = iidOpt(spriteMap[ent.type] ?? "snowball") ?? iid("snowball")
-                stack = ItemStack(id, 1)
-                size = 0.35
-                if ent.type == "fireball" || ent.type == "dragon_fireball" || ent.type == "wither_skull" { emissive = 1 }
-            }
-            guard let stack else { continue }
-            let dx = ent.x - camPos.x, dz = ent.z - camPos.z
-            if dx * dx + dz * dz > 64 * 64 { continue }
-            let ix = ent.prevX + (ent.x - ent.prevX) * partial
-            let iy = ent.prevY + (ent.y - ent.prevY) * partial
-            let iz = ent.prevZ + (ent.z - ent.prevZ) * partial
-            let bx = ifloorD(ent.x), by = ifloorD(ent.y + 0.3), bz = ifloorD(ent.z)
-            let sky = max(0, Double(w.getSkyLight(bx, by, bz)) - w.skyDarken())
-            let light = max(Double(w.info.ambientLight),
-                            max(sky * dayLight * 15 / max(1, 15 - w.skyDarken()), Double(w.getBlockLight(bx, by, bz))))
-            items.append((ix, iy, iz, spriteSlot(stack), size,
-                          ent.type == "item" ? detSin((Double(ent.age) + partial) * 0.08) * 0.08 + 0.12 : 0,
-                          min(1, max(0.12, light / 15)), emissive))
-        }
+        let items = pebBillboards(w, dayLight: dayLight, camX: camPos.x, camZ: camPos.z, partial: partial)
         if items.isEmpty { return }
         enc.setRenderPipelineState(packTargets ? spritePipelineHDR : spritePipeline)
         enc.setDepthStencilState(depthWrite)
@@ -1429,8 +1326,9 @@ final class WorldRenderer {
         enc.setFragmentSamplerState(atlasSampler, index: 0)
         let rx = Float(detCos(cam.yaw)), rz = Float(detSin(cam.yaw))
         for it in items {
-            let u0 = Float((it.slot % 128) * 16) / 2048
-            let v0 = Float((it.slot / 128) * 16) / 512
+            let slot = spriteSlot(it.stack)
+            let u0 = Float((slot % 128) * 16) / 2048
+            let v0 = Float((slot / 128) * 16) / 512
             var u = SpriteUniforms(
                 viewProj: viewProj,
                 center: SIMD4<Float>(Float(it.x - camPos.x), Float(it.y + it.bob - camPos.y), Float(it.z - camPos.z), Float(it.size)),
@@ -1445,79 +1343,12 @@ final class WorldRenderer {
     }
 
     // ---- textured cubes (falling blocks, TNT, crystal base) ----------------------
-    private func packCube(_ out: inout [Float], _ outIdx: inout [UInt32],
-                          _ x0: Float, _ y0: Float, _ z0: Float, _ x1: Float, _ y1: Float, _ z1: Float,
-                          _ blockCell: Int, _ sky: Int, _ blk: Int, _ flash: Bool) {
-        let id = blockCell >> 4
-        let meta = blockCell & 15
-        let def = blockDefs[id]
-        func tileOf(_ face: Int) -> Int {
-            def.texFn?(meta, face) ?? (def.tex.isEmpty ? 0 : Int(def.tex[face]))
-        }
-        func u32(_ layer: Int, _ normal: Int) -> UInt32 {
-            // stepwise on a typed Int: the inline bitwise-OR chain overruns the
-            // Swift type-checker on some toolchains (6.2.4). Same result.
-            var v = layer & 4095
-            v |= normal << 12
-            v |= 3 << 15
-            v |= (sky & 15) << 17
-            v |= (blk & 15) << 21
-            v |= (flash ? 1 : 0) << 25
-            return UInt32(v)
-        }
-        let Bv: UInt32 = 0xffffff
-        let faces: [(Int, [[Float]])] = [
-            (0, [[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]]),
-            (1, [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]]),
-            (2, [[x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z0]]),
-            (3, [[x0, y0, z1], [x0, y1, z1], [x1, y1, z1], [x1, y0, z1]]),
-            (4, [[x0, y0, z0], [x0, y1, z0], [x0, y1, z1], [x0, y0, z1]]),
-            (5, [[x1, y0, z1], [x1, y1, z1], [x1, y1, z0], [x1, y0, z0]]),
-        ]
-        let uvs: [[Float]] = [[0, 1], [1, 1], [1, 0], [0, 0]]
-        for (face, corners) in faces {
-            let layer = tileOf(face)
-            let base = UInt32(out.count / 7)
-            for i in 0..<4 {
-                let c = corners[i]
-                out.append(contentsOf: [c[0], c[1], c[2], uvs[i][0], uvs[i][1],
-                                        Float(bitPattern: u32(layer, face)), Float(bitPattern: Bv)])
-            }
-            outIdx.append(contentsOf: [base, base + 1, base + 2, base + 2, base + 3, base])
-        }
-    }
 
     private func drawCubes(_ enc: MTLRenderCommandEncoder, game: GameCore, viewProj: simd_float4x4,
                            camPos: SIMD3<Double>, uni: inout ChunkSharedU, partial: Double) {
         let w = game.world
-        var verts: [Float] = []
-        var idx: [UInt32] = []
-        for e in w.entities {
-            if e.dead { continue }
-            guard let ent = e as? Entity else { continue }
-            var blockCell = 0
-            var flash = false
-            if let fb = ent as? FallingBlockEntity {
-                blockCell = fb.blockCell
-            } else if let tnt = ent as? TNTEntity {
-                blockCell = Int(cell(B.tnt))
-                flash = (Double(tnt.fuse) / 5).truncatingRemainder(dividingBy: 2) < 1
-            } else {
-                continue
-            }
-            let dx = ent.x - camPos.x, dz = ent.z - camPos.z
-            if dx * dx + dz * dz > 96 * 96 { continue }
-            let ix = Float(ent.prevX + (ent.x - ent.prevX) * partial - camPos.x)
-            let iy = Float(ent.prevY + (ent.y - ent.prevY) * partial - camPos.y)
-            let iz = Float(ent.prevZ + (ent.z - ent.prevZ) * partial - camPos.z)
-            let bx = ifloorD(ent.x), by = ifloorD(ent.y + 0.5), bz = ifloorD(ent.z)
-            let half: Float = 0.49
-            let fuse = (ent as? TNTEntity)?.fuse ?? 0
-            packCube(&verts, &idx, ix - half, iy, iz - half, ix + half, iy + half * 2, iz + half,
-                     blockCell, w.getSkyLight(bx, by, bz),
-                     max(w.getBlockLight(bx, by, bz), flash ? 15 : 0),
-                     flash && fuse % 10 < 5)
-        }
+        let (verts, idx) = pebCubeMeshes(w, camX: camPos.x, camY: camPos.y, camZ: camPos.z,
+                                         partial: partial)
         guard !idx.isEmpty else { return }
         let vb = verts.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
         let ib = idx.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
@@ -1553,36 +1384,8 @@ final class WorldRenderer {
         let key = stage &+ (cell &* 16) &+ (p.breakingX &* 1_000_003) &+ (p.breakingY &* 7919) &+ (p.breakingZ &* 31)
         if key != overlayStage || overlayMesh == nil {
             overlayStage = key
-            var scratch: [AABB] = []
-            shapeBoxes(cell, { dx, dy, dz in w.getBlock(p.breakingX + dx, p.breakingY + dy, p.breakingZ + dz) }, &scratch, false)
-            if scratch.isEmpty { scratch = [AABB(0, 0, 0, 1, 1, 1)] }
-            var verts: [Float] = []
-            var idx: [UInt32] = []
-            let layer = tileId("destroy_\(stage)")
-            let g: Float = 0.004
-            let A = UInt32((layer & 4095) | (3 << 15) | (15 << 17) | (15 << 21))
-            let uvs: [[Float]] = [[0, 1], [1, 1], [1, 0], [0, 0]]
-            for b in scratch {
-                let x0 = Float(b.x0) - g, y0 = Float(b.y0) - g, z0 = Float(b.z0) - g
-                let x1 = Float(b.x1) + g, y1 = Float(b.y1) + g, z1 = Float(b.z1) + g
-                let faces: [[[Float]]] = [
-                    [[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]],
-                    [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]],
-                    [[x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z0]],
-                    [[x0, y0, z1], [x0, y1, z1], [x1, y1, z1], [x1, y0, z1]],
-                    [[x0, y0, z0], [x0, y1, z0], [x0, y1, z1], [x0, y0, z1]],
-                    [[x1, y0, z1], [x1, y1, z1], [x1, y1, z0], [x1, y0, z0]],
-                ]
-                for fi in 0..<6 {
-                    let base = UInt32(verts.count / 7)
-                    for i in 0..<4 {
-                        let c = faces[fi][i]
-                        verts.append(contentsOf: [c[0], c[1], c[2], uvs[i][0], uvs[i][1],
-                                                  Float(bitPattern: A | UInt32(fi << 12)), Float(bitPattern: 0xffffff)])
-                    }
-                    idx.append(contentsOf: [base, base + 1, base + 2, base + 2, base + 3, base])
-                }
-            }
+            let (verts, idx) = pebCrackMesh(w, x: p.breakingX, y: p.breakingY, z: p.breakingZ,
+                                            stage: stage)
             let vb = verts.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
             let ib = idx.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
             overlayMesh = (vb, ib, idx.count)

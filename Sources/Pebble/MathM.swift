@@ -2,6 +2,7 @@
 // mat4 op set the entity animator uses (deterministic op set).
 
 import simd
+import PebbleCore
 
 func mat4Perspective(fovYRad: Float, aspect: Float, near: Float, far: Float) -> simd_float4x4 {
     let f = 1 / tan(fovYRad / 2)
@@ -95,5 +96,25 @@ struct Frustum {
             if p.x * px + p.y * py + p.z * pz + p.w < 0 { return false }
         }
         return true
+    }
+}
+
+extension simd_float4x4 {
+    /// the portable Mat4f — same column-major convention, so this is a copy
+    init(_ m: Mat4f) {
+        self.init(columns: (SIMD4<Float>(m.m[0], m.m[1], m.m[2], m.m[3]),
+                            SIMD4<Float>(m.m[4], m.m[5], m.m[6], m.m[7]),
+                            SIMD4<Float>(m.m[8], m.m[9], m.m[10], m.m[11]),
+                            SIMD4<Float>(m.m[12], m.m[13], m.m[14], m.m[15])))
+    }
+}
+
+extension Mat4f {
+    /// the simd matrix — same column-major convention, so this is a copy
+    init(_ m: simd_float4x4) {
+        self.init([m.columns.0.x, m.columns.0.y, m.columns.0.z, m.columns.0.w,
+                   m.columns.1.x, m.columns.1.y, m.columns.1.z, m.columns.1.w,
+                   m.columns.2.x, m.columns.2.y, m.columns.2.z, m.columns.2.w,
+                   m.columns.3.x, m.columns.3.y, m.columns.3.z, m.columns.3.w])
     }
 }

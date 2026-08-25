@@ -44,6 +44,10 @@ smokeSystemsSuite()
 smokePhysicsSuite()
 smokeRenderABISuite()
 smokeCodecSuite()
+smokeAudioSuite()
+smokeAnimatorSuite()
+smokeShadowSuite()
+smokeMatrixSuite()
 smokeNetProtocolSuite()
 smokeSocketTransportSuite()
 
@@ -170,7 +174,16 @@ do {
             let before = g.player.health
             _ = puppet.hurt(3, "mob")
             check("puppet damage reaches guest", pumpUntil(100) { g.player.health < before },
-                  "guest health stayed \(g.player.health)")
+                  "before=\(before) after=\(g.player.health) puppet=\(puppet.health) dead=\(g.player.dead)")
+
+            // ...and then STOPS. The host mirrors the guest's reported health
+            // onto the puppet; if it reads that mirror back as fresh damage it
+            // echoes a point per tick and the guest bleeds out from a single
+            // scratch. This pins the watermark fix in NetSession.applyGuestState.
+            let settled = g.player.health
+            _ = pumpUntil(120) { false }   // just run the clock
+            check("guest damage does not echo", g.player.health >= settled - 0.001,
+                  "settled at \(settled), drifted to \(g.player.health)")
         }
 
         // clock sync keeps drift small

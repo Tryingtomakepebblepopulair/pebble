@@ -33,61 +33,10 @@ extension EntityRendererM {
     // armor overlays
     // =========================================================================
     /// vanilla armor texture material for a worn stack ("golden_helmet" → "gold")
-    static func armorMaterial(_ s: ItemStack) -> String? {
-        let name = itemDef(s.id).name
-        guard name.hasSuffix("_helmet") || name.hasSuffix("_chestplate")
-            || name.hasSuffix("_leggings") || name.hasSuffix("_boots") else { return nil }
-        let mat = String(name.split(separator: "_").first ?? "")
-        return mat == "golden" ? "gold" : mat
-    }
-
-    private static let armorColors: [String: Int] = [
-        "leather": 0x8a5a33, "chainmail": 0x9a9a9a, "iron": 0xd8d8d8,
-        "gold": 0xecc540, "diamond": 0x4dede0, "netherite": 0x443c3f, "turtle": 0x3aa746,
-    ]
-
-    /// the overlay rig for one armor slot — part names match the biped so the
-    /// animator poses them exactly like the body underneath
-    private func armorModel(_ piece: Int, _ mat: String) -> MobModel {
-        let color = Self.armorColors[mat] ?? 0x9a9a9a
-        func P(_ name: String, _ pivot: (Double, Double, Double), _ boxes: ModelBox...) -> ModelPart {
-            ModelPart(name: name, pivot: pivot, boxes: boxes)
-        }
-        switch piece {
-        case 0: // helmet
-            return MobModel(texW: 64, texH: 32, parts: [
-                P("head", (0, 24, 0), ModelBox(-4, 0, -4, 8, 8, 8, 0, 0, 0.75)),
-            ], anim: "biped", scale: 1, paint: { s in s.box(0, 0, 8, 8, 8, color, 0.06) })
-        case 1: // chestplate + shoulders
-            return MobModel(texW: 64, texH: 32, parts: [
-                P("body", (0, 24, 0), ModelBox(-4, -12, -2, 8, 12, 4, 16, 16, 0.51)),
-                P("armR", (-5, 22, 0), ModelBox(-3, -10, -2, 4, 12, 4, 40, 16, 0.6)),
-                P("armL", (5, 22, 0), ModelBox(-1, -10, -2, 4, 12, 4, 40, 16, 0.6)),
-            ], anim: "biped", scale: 1, paint: { s in
-                s.box(16, 16, 8, 12, 4, color, 0.06)
-                s.box(40, 16, 4, 12, 4, color, 0.06)
-            })
-        case 2: // leggings (vanilla layer_2)
-            return MobModel(texW: 64, texH: 32, parts: [
-                P("body", (0, 24, 0), ModelBox(-4, -12, -2, 8, 12, 4, 16, 16, 0.26)),
-                P("legR", (-2, 12, 0), ModelBox(-2, -12, -2, 4, 12, 4, 0, 16, 0.26)),
-                P("legL", (2, 12, 0), ModelBox(-2, -12, -2, 4, 12, 4, 0, 16, 0.26)),
-            ], anim: "biped", scale: 1, paint: { s in
-                s.box(16, 16, 8, 12, 4, color, 0.06)
-                s.box(0, 16, 4, 12, 4, color, 0.06)
-            })
-        default: // boots
-            return MobModel(texW: 64, texH: 32, parts: [
-                P("legR", (-2, 12, 0), ModelBox(-2, -12, -2, 4, 12, 4, 0, 16, 0.76)),
-                P("legL", (2, 12, 0), ModelBox(-2, -12, -2, 4, 12, 4, 0, 16, 0.76)),
-            ], anim: "biped", scale: 1, paint: { s in s.box(0, 16, 4, 12, 4, color, 0.06) })
-        }
-    }
-
     private func armorGeom(_ piece: Int, _ mat: String) -> ModelGPU? {
         let key = "armor:\(piece):\(mat)"
         if let g = gearGeoms[key] { return g }
-        let model = armorModel(piece, mat)
+        let model = pebArmorModel(piece, mat)
         let built = buildEntityGeometry(from: model, skinName: key)
         // vanilla armor sheets are 64×32; leather is grayscale + tinted, with
         // an untinted overlay on top
@@ -116,63 +65,12 @@ extension EntityRendererM {
     /// one thin textured slab per opaque icon pixel face; no shader tricks,
     /// works with any pipeline. 16 px = 1 model unit, grip scaled at draw time.
     private func itemGeom(_ stack: ItemStack) -> ModelGPU? {
-        let def = itemDef(stack.id)
-        if def.name == "shield" { return shieldGeom() }
         let key = "item:\(stack.id):\(stack.data.potion ?? "")"
+        if itemDef(stack.id).name == "shield" { return shieldGeom() }
         if let g = itemGeoms[key] { return g }
-        let rgba = itemIconPixels(stack.id, stack.data)
-        // icons are square but pack-dependent in size (16× vanilla, 32× Faithful…)
-        let n = Int(Double(rgba.count / 4).squareRoot().rounded())
-        guard n >= 8, n * n * 4 == rgba.count else { return nil }
-        func solid(_ c: Int, _ r: Int) -> Bool {
-            c >= 0 && c < n && r >= 0 && r < n && rgba[(r * n + c) * 4 + 3] > 96
-        }
-        var verts: [Float] = []
-        let t: Float = 1.0 / 16 / 2   // half thickness in blocks (1 sprite px slab)
-        func quad(_ c0: SIMD3<Float>, _ c1: SIMD3<Float>, _ c2: SIMD3<Float>, _ c3: SIMD3<Float>,
-                  _ n: SIMD3<Float>, _ u: Float, _ v: Float) {
-            let corners = [c0, c1, c2, c3]
-            for i in [0, 2, 1, 0, 3, 2] {
-                let p = corners[i]
-                verts += [p.x, p.y, p.z, n.x, n.y, n.z, u, v, 0]
-            }
-        }
-        let cell = 1.0 / Float(n)
-        for r in 0..<n {
-            for c in 0..<n where solid(c, r) {
-                // sprite: column → x (centered), row 0 = top → y
-                let x0 = Float(c) * cell - 0.5, x1 = x0 + cell
-                let y1 = Float(n - r) * cell, y0 = y1 - cell
-                let u = (Float(c) + 0.5) / Float(n), v = (Float(r) + 0.5) / Float(n)
-                quad(.init(x0, y0, -t), .init(x1, y0, -t), .init(x1, y1, -t), .init(x0, y1, -t),
-                     .init(0, 0, -1), u, v)
-                quad(.init(x1, y0, t), .init(x0, y0, t), .init(x0, y1, t), .init(x1, y1, t),
-                     .init(0, 0, 1), u, v)
-                if !solid(c - 1, r) {
-                    quad(.init(x0, y0, t), .init(x0, y0, -t), .init(x0, y1, -t), .init(x0, y1, t),
-                         .init(-1, 0, 0), u, v)
-                }
-                if !solid(c + 1, r) {
-                    quad(.init(x1, y0, -t), .init(x1, y0, t), .init(x1, y1, t), .init(x1, y1, -t),
-                         .init(1, 0, 0), u, v)
-                }
-                if !solid(c, r - 1) {   // pixel above (higher y)
-                    quad(.init(x0, y1, -t), .init(x1, y1, -t), .init(x1, y1, t), .init(x0, y1, t),
-                         .init(0, 1, 0), u, v)
-                }
-                if !solid(c, r + 1) {   // pixel below
-                    quad(.init(x0, y0, t), .init(x1, y0, t), .init(x1, y0, -t), .init(x0, y0, -t),
-                         .init(0, -1, 0), u, v)
-                }
-            }
-        }
-        guard !verts.isEmpty else { return nil }
-        let model = MobModel(texW: n, texH: n, parts: [ModelPart(name: "item", pivot: (0, 0, 0), boxes: [])],
-                             anim: "none", scale: 1, paint: { _ in })
-        let geom = EntityGeometry(verts: verts, vertexCount: verts.count / 9,
-                                  partNames: ["item"], model: model,
-                                  skin: EntitySkin(n, n, key))
-        guard let g = makeGPU(geom, rgba, n, n) else { return nil }
+        guard let built = pebItemGeometry(stack),
+              let g = makeGPU(built.geom, built.tex, built.geom.skin.w, built.geom.skin.h)
+        else { return nil }
         itemGeoms[key] = g
         return g
     }
@@ -180,15 +78,7 @@ extension EntityRendererM {
     /// simple board shield (planks + iron boss), procedural texture
     private func shieldGeom() -> ModelGPU? {
         if let g = itemGeoms["shield"] { return g }
-        let model = MobModel(texW: 32, texH: 32, parts: [
-            ModelPart(name: "shield", pivot: (0, 0, 0), boxes: [ModelBox(-6, -11, -1, 12, 22, 1, 0, 0)]),
-        ], anim: "none", scale: 1, paint: { s in
-            s.box(0, 0, 12, 22, 1, 0x7a5b34, 0.1)      // oak planks
-            s.rect(6, 2, 2, 22, 0x8a6b40)              // center plank stripe
-            s.rect(5, 10, 4, 6, 0xb9bdc1)              // iron boss
-            s.rect(6, 11, 2, 4, 0xd6dadd)
-        })
-        let built = buildEntityGeometry(from: model, skinName: "shield")
+        let built = buildEntityGeometry(from: pebShieldModel(), skinName: "shield")
         guard let g = makeGPU(built, built.skin.data, built.skin.w, built.skin.h) else { return nil }
         itemGeoms["shield"] = g
         return g
@@ -233,47 +123,17 @@ extension EntityRendererM {
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: g.count)
         }
 
-        // ---- held items (part 0 of the item mesh rides the captured arm matrix)
-        func heldMatrix(_ armMat: simd_float4x4, right: Bool, shield: Bool, raised: Bool) -> simd_float4x4 {
-            var m = armMat
-            if shield {
-                // strapped flat to the forearm; swings up-front when blocking
-                m = mTranslate(m, right ? -1.0 / 16 : 1.0 / 16, -9.0 / 16, raised ? -3.5 / 16 : 3.0 / 16)
-                m = mRotateY(m, right ? 0.12 : -0.12)
-                if raised { m = mRotateX(m, -0.15) }
-            } else {
-                // vanilla-style hold: blade plane slices forward, tilted
-                // ~55° up-forward and a touch outward so it reads from behind
-                m = mTranslate(m, right ? -1.5 / 16 : 1.5 / 16, -9.5 / 16, -1.0 / 16)
-                m = mRotateZ(m, right ? 0.25 : -0.25)   // outward = -X for the right arm
-                m = mRotateX(m, -0.7)
-                m = mRotateY(m, right ? -.pi / 2 : .pi / 2)
-                m = mScale(m, 0.7, 0.7, 0.7)
-                m = mTranslate(m, 0, -0.12, 0)
+        // every piece and every matrix comes from the shared gear list, so
+        // the Vulkan client hangs the same sword off the same wrist
+        let bodyParts = partMats.map { Mat4f($0) }
+        for piece in pebPlayerGear(player, pose: p, bodyParts: bodyParts, time: time) {
+            let g: ModelGPU?
+            switch piece.geom {
+            case .held(let s): g = itemGeom(s)
+            case .armor(let idx, let material): g = armorGeom(idx, material)
             }
-            return m
-        }
-
-        var idM = [simd_float4x4](repeating: matrix_identity_float4x4, count: 24)
-        if let s = player.mainHand, let g = itemGeom(s) {
-            let shield = itemDef(s.id).name == "shield"
-            idM[0] = heldMatrix(armR, right: true, shield: shield, raised: p.blockingHand == "main")
-            submit(g, base, idM)
-        }
-        if let s = player.offHand, let g = itemGeom(s) {
-            let shield = itemDef(s.id).name == "shield"
-            idM[0] = heldMatrix(armL, right: false, shield: shield, raised: p.blockingHand == "off")
-            submit(g, base, idM)
-        }
-
-        // ---- armor overlays (each piece re-runs the shared animator)
-        for piece in 0..<4 {
-            guard player.armor.indices.contains(piece), let s = player.armor[piece],
-                  let mat = Self.armorMaterial(s), let g = armorGeom(piece, mat) else { continue }
-            pose(g, p, time)
-            var mats = [simd_float4x4](repeating: matrix_identity_float4x4, count: 24)
-            for i in 0..<24 { mats[i] = partMats[i] }
-            submit(g, base, mats)
+            guard let g else { continue }
+            submit(g, base, piece.parts.map { simd_float4x4($0) })
         }
     }
 
@@ -284,9 +144,7 @@ extension EntityRendererM {
     /// bare right arm textured with the current player skin
     private func fpArmGeom() -> ModelGPU? {
         if let g = itemGeoms["fp_arm"] { return g }
-        let model = MobModel(texW: 64, texH: 64, parts: [
-            ModelPart(name: "arm", pivot: (0, 0, 0), boxes: [ModelBox(-2, -12, -2, 4, 12, 4, 40, 16)]),
-        ], anim: "none", scale: 1, paint: { _ in })
+        let model = pebFirstPersonArmModel()
         let built = buildEntityGeometry(from: model, skinName: "fp_arm")
         guard let vb = built.verts.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: max(1, $0.count)) })
         else { return nil }
@@ -299,17 +157,6 @@ extension EntityRendererM {
     func drawFirstPerson(_ enc: MTLRenderCommandEncoder, pipeline: MTLRenderPipelineState, sampler: MTLSamplerState,
                          proj: simd_float4x4, player: Player, timeSec: Double, dayLight: Double,
                          skyL: Int, blockL: Int, gamma: Double, ambient: Double) {
-        let held = player.mainHand
-        let heldDef = held.map { itemDef($0.id) }
-        let isShield = heldDef?.name == "shield"
-        let offShield = player.offHand.map { itemDef($0.id).name == "shield" } ?? false
-
-        // swing arc: attackAnim decays 1 → 0, so progress f runs 0 → 1
-        let f = max(0, 1 - Double(player.attackAnim))
-        let swinging = player.attackAnim > 0.01
-        let s1 = swinging ? Foundation.sin(f * .pi) : 0
-        let s2 = swinging ? Foundation.sin(f.squareRoot() * .pi) : 0
-
         func submit(_ g: ModelGPU, _ m: simd_float4x4) {
             var u = EntityUniforms(
                 viewProj: proj,
@@ -335,58 +182,16 @@ extension EntityRendererM {
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: g.count)
         }
 
-        // off-hand shield sits on the left edge (raised when blocking)
-        if offShield, let g = itemGeom(player.offHand!) {
-            let raised = player.usingItem && player.useItemHand == "off"
-            var m = matrix_identity_float4x4
-            m = mTranslate(m, raised ? -0.35 : -0.6, raised ? -0.35 : -0.62, -0.85)
-            m = mRotateY(m, raised ? 0.55 : 0.85)
-            m = mRotateZ(m, raised ? 0.05 : 0.12)
-            let s: Float = raised ? 0.55 : 0.5
-            m = mScale(m, s, s, s)
-            submit(g, m)
-        }
-
-        var m = matrix_identity_float4x4
-        if let held, let g = itemGeom(held) {
-            if isShield {
-                let raised = player.usingItem && player.useItemHand == "main"
-                m = mTranslate(m, raised ? 0.35 : 0.6, raised ? -0.35 : -0.62, -0.85)
-                m = mRotateY(m, raised ? -0.55 : -0.85)
-                let s: Float = raised ? 0.55 : 0.5
-                m = mScale(m, s, s, s)
-                submit(g, m)
-                return
+        // every piece and every matrix comes from the shared viewmodel, so
+        // the Vulkan client holds the same item at the same angle
+        for part in pebViewmodel(player) {
+            let g: ModelGPU?
+            switch part.piece {
+            case .fist: g = fpArmGeom()
+            case .item(let s), .offhand(let s): g = itemGeom(s)
             }
-            // eating / drinking wiggle, bow draw pull
-            var eat = 0.0, pull: Double = 0
-            if player.usingItem && player.useItemHand == "main" {
-                if heldDef?.food != nil || heldDef?.name == "potion" || heldDef?.name == "milk_bucket" {
-                    eat = Foundation.sin(Double(player.useItemTicks) * 1.1) * 0.05 + 0.25
-                } else if heldDef?.name == "bow" || heldDef?.name == "crossbow" {
-                    pull = min(1, Double(player.useItemTicks) / 20)
-                }
-            }
-            m = mTranslate(m,
-                           Float(0.56 - s2 * 0.34 - eat * 0.9 - pull * 0.12),
-                           Float(-0.5 - s1 * 0.2 + eat * 0.35),
-                           Float(-0.72 - s1 * 0.05 + pull * 0.16))
-            m = mRotateY(m, Float(0.15 - s2 * 1.05 + pull * 0.45))
-            m = mRotateZ(m, Float(-s2 * 0.3))
-            m = mRotateX(m, Float(-s1 * 0.85 + eat * 0.8))
-            m = mScale(m, 0.62, 0.62, 0.62)
-            submit(g, m)
-        } else if held == nil, let g = fpArmGeom() {
-            // empty fist: shoulder anchored off-screen bottom-right, forearm
-            // rising diagonally toward the center (hand = the box's -Y end)
-            m = mTranslate(m,
-                           Float(0.78 - s2 * 0.35),
-                           Float(-0.9 - s1 * 0.18),
-                           Float(-0.55))
-            m = mRotateY(m, Float(0.5 - s2 * 0.8))
-            m = mRotateX(m, Float(2.25 - s1 * 0.9))
-            m = mScale(m, 1.1, 1.1, 1.1)
-            submit(g, m)
+            guard let g else { continue }
+            submit(g, simd_float4x4(part.model))
         }
     }
 }

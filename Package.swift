@@ -101,15 +101,23 @@ let package = Package(
             name: "CPebbleVulkan",
             path: "Sources/CPebbleVulkan"
         ),
+        // the audio sink behind a C ABI (PORTING module 10) — winmm's
+        // waveOut on Windows, stubs elsewhere. Pebble synthesizes every
+        // sound, so a platform only has to hand over finished samples.
+        .target(
+            name: "CPebbleAudio",
+            path: "Sources/CPebbleAudio"
+        ),
         // the Windows client shell: Win32 window + message pump + Vulkan
         // (PORTING module 09 bootstrap) — a friendly stub on other platforms
         .executableTarget(
             name: "PebbleWin",
-            dependencies: ["PebbleCoreBase", "CPebbleVulkan"],
+            dependencies: ["PebbleCoreBase", "CPebbleVulkan", "CPebbleAudio"],
             path: "Sources/PebbleWin",
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .linkedLibrary("user32", .when(platforms: [.windows])),
+                .linkedLibrary("winmm", .when(platforms: [.windows])),
             ]
         ),
         // dedicated LAN/SMP server: runs a world headless, no host player.

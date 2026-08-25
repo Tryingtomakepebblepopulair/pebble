@@ -1,0 +1,111 @@
+# Builds a downloadable Pebble for macOS and Windows and attaches both to a
+# GitHub Release. Tag a commit to publish:
+#
+#     git tag v1.2.0 && git push origin v1.2.0
+#
+# or run it by hand from the Actions tab. Neither build is code-signed, so
+# both platforms show a "this is from the internet" warning the first time —
+# the READMEs inside each zip explain the one click that gets past it.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: macOS app
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -c release --product Pebble
+      - name: Assemble Pebble.app
+        run: |
+          set -euo pipefail
+          APP="dist/Pebble.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp packaging/Info.plist   "$APP/Contents/Info.plist"
+          cp packaging/AppIcon.icns "$APP/Contents/Resources/"
+          cp packaging/logo.png     "$APP/Contents/Resources/"
+          cp packaging/title-bg.png "$APP/Contents/Resources/"
+          cp packaging/*.zip        "$APP/Contents/Resources/" || true
+          cp packaging/FAITHFUL-LICENSE.txt "$APP/Contents/Resources/" || true
+          cp .build/release/Pebble  "$APP/Contents/MacOS/Pebble"
+          # ad-hoc: enough to run, not enough for Gatekeeper. See the README.
+          codesign --force --sign - "$APP"
+          cp packaging/OPENING-ON-ANOTHER-MAC.txt dist/
+          cd dist && ditto -c -k --keepParent Pebble.app Pebble-macOS.zip
+          zip -j Pebble-macOS.zip OPENING-ON-ANOTHER-MAC.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pebble-macos
+          path: dist/Pebble-macOS.zip
+
+  windows:
+    name: Windows app
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: compnerd/gha-setup-swift@v0.4.0
+        with:
+          swift-version: swift-6.2.1-release
+          swift-build: 6.2.1-RELEASE
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -c release --product PebbleWin
+      - name: Stage
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path stage | Out-Null
+          Copy-Item .build\release\PebbleWin.exe stage\Pebble.exe
+          # the Swift runtime DLLs travel with the exe — no install needed
+          $core = (& where.exe swiftCore.dll | Select-Object -First 1)
+          Copy-Item (Join-Path (Split-Path -Parent $core) '*.dll') stage\
+          New-Item -ItemType Directory -Force -Path stage\assets | Out-Null
+          Copy-Item packaging\title-bg.png stage\assets\
+          Copy-Item packaging\logo.png stage\assets\
+          Copy-Item "packaging\Faithful 32x - 1.20.1.zip" stage\assets\
+          Copy-Item packaging\FAITHFUL-LICENSE.txt stage\assets\ -ErrorAction SilentlyContinue
+          Copy-Item packaging\OPENING-ON-WINDOWS.txt stage\
+          Compress-Archive -Path stage\* -DestinationPath Pebble-Windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pebble-windows
+          path: Pebble-Windows.zip
+
+  publish:
+    name: Publish the release
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloads
+      - name: Attach both builds to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: downloads/**/*.zip
+          generate_release_notes: true
+          body: |
+            ## Download
+
+            - **Windows** — `Pebble-Windows.zip`. Unzip anywhere, run `Pebble.exe`.
+            - **macOS** (Apple silicon) — `Pebble-macOS.zip`. Unzip, drag Pebble to Applications.
+
+            ### The first launch shows a warning. That is expected.
+
+            Neither build is code-signed — that needs a paid developer account
+            on both platforms — so each OS asks once before it trusts the app.
+
+            **Windows:** "Windows protected your PC" → **More info** → **Run anyway**.
+
+            **macOS:** double-click Pebble and let it be refused, then
+            System Settings → Privacy & Security → scroll down → **Open Anyway**.
+
+            Each zip contains a short text file with the same instructions.

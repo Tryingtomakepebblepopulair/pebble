@@ -1,0 +1,32 @@
+Opening Pebble on Windows
+=========================
+
+Double-click Pebble.exe. The first time, Windows will probably show a blue
+box that says "Windows protected your PC".
+
+Click "More info", then "Run anyway".
+
+That is all. Windows only asks once.
+
+Why it asks
+-----------
+Windows trusts programs whose publisher paid for a code-signing certificate.
+Pebble is a hobby project and does not have one, so SmartScreen flags it as
+"unknown publisher". It is the same warning every unsigned program gets. If
+you would rather not take our word for it, the whole source is on GitHub and
+you can build it yourself.
+
+Playing
+-------
+WASD to move, space to jump, shift to sneak, ctrl to sprint.
+E for inventory, T for chat, Esc for the menu.
+Left click to break, right click to place. Click the window to capture the
+mouse.
+
+Multiplayer: Multiplayer > Direct connect, then type ip:port.
+
+Your own skin: drop a 64x64 skin.png into the PebbleData folder that appears
+next to Pebble.exe. Friends will see it.
+
+Something wrong? Send pebble-log.txt (next to Pebble.exe) and a screenshot
+(Win+Shift+S).

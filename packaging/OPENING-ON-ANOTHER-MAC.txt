@@ -1,0 +1,37 @@
+Opening Pebble on a Mac that did not build it
+=============================================
+
+If macOS says Pebble "cannot be opened" or that Apple "could not verify it is
+free of malware", nothing is wrong with the download. Apple blocks every app
+that has not been through their paid notarization service, and Pebble has not.
+
+Pick either route — both take about ten seconds.
+
+The button
+----------
+1. Double-click Pebble. Let it be refused. (This step matters: it is what
+   makes the button below appear.)
+2. Open System Settings > Privacy & Security.
+3. Scroll to the bottom. There is now a line about Pebble being blocked, with
+   an "Open Anyway" button. Click it.
+4. Double-click Pebble again and choose Open.
+
+macOS only asks once. From then on it launches normally.
+
+The one-liner
+-------------
+Open Terminal and paste this, with the path to wherever Pebble.app is:
+
+    xattr -dr com.apple.quarantine ~/Downloads/Pebble.app
+
+Then open it normally. That command removes the "downloaded from the
+internet" flag, which is exactly what the Open Anyway button does.
+
+Why this happens
+----------------
+Shipping an app that opens with one click requires an Apple Developer
+membership (99 USD a year) so the build can be signed and notarized. Pebble is
+a hobby project and does not have one. The source is all here if you would
+rather build it yourself:
+
+    ./pebble install

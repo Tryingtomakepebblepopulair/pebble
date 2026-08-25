@@ -21,6 +21,15 @@ layout(location = 2) out float vFogDist;
 layout(location = 3) out vec3 vWorldPos;
 layout(location = 4) flat out uint vLayer;
 layout(location = 5) flat out uint vAnim;
+layout(location = 6) out vec4 vShadowPos;
+layout(location = 7) out float vSkyAmt;
+
+// the sun's view-projection, constant for the whole frame — it cannot live
+// in push constants because the chunk block is already the full 128 bytes
+layout(set = 0, binding = 2) uniform Shadow {
+    mat4 mat;
+    vec4 params;    // x = on, y = texel size
+} shadow;
 
 const float FACE_SHADE[6] = float[](0.55, 1.0, 0.8, 0.8, 0.62, 0.62);
 
@@ -71,4 +80,6 @@ void main() {
     vLayer = layer;
     vAnim = anim;
     vWorldPos = wpos;
+    vShadowPos = shadow.mat * vec4(rel, 1.0);
+    vSkyAmt = sky * (1.0 - emissive);
 }
