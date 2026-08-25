@@ -3,9 +3,13 @@
 #
 #     git tag v1.2.0 && git push origin v1.2.0
 #
-# or run it by hand from the Actions tab. Neither build is code-signed, so
-# both platforms show a "this is from the internet" warning the first time —
-# the READMEs inside each zip explain the one click that gets past it.
+# Running it by hand from the Actions tab builds both platforms and leaves
+# them as downloadable run artifacts WITHOUT publishing a release — that is
+# the safe way to try it. Only a tag publishes.
+#
+# Neither build is code-signed, so both platforms show a "this is from the
+# internet" warning the first time; the README inside each zip explains the
+# one click that gets past it.
 name: Release
 
 on:
@@ -83,6 +87,10 @@ jobs:
     name: Publish the release
     needs: [macos, windows]
     runs-on: ubuntu-latest
+    # only a tag publishes. Running this by hand from the Actions tab builds
+    # both platforms and leaves them as run artifacts, so the workflow can be
+    # tried out without putting a half-finished release on the front page.
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@v4
         with:
