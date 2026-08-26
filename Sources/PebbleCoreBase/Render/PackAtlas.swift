@@ -205,7 +205,7 @@ public func stripFrame(_ img: RGBAImage, _ i: Int) -> RGBAImage {
 }
 
 /// nested-zip tolerant lookup root ("assets/minecraft/textures/")
-private func packTexPrefix(_ zip: Data) -> String? {
+public func packTexPrefix(_ zip: Data) -> String? {
     guard let names = pebZipList(zip) else { return nil }
     for n in names where n.contains("assets/minecraft/textures/") {
         return String(n[..<n.range(of: "assets/minecraft/textures/")!.upperBound])
@@ -227,6 +227,12 @@ public struct PackTerrainAtlas {
     public let res: Int
     public let slices: [[UInt8]]
     public let appliedTiles: Int
+    /// the same tiles at 16px — item icons and the UI canvas draw from these
+    public let icon16: BuiltAtlas
+    /// per tile: 1 = still take the biome tint, 0 = the pack already coloured
+    /// it. Without this every pack-supplied tile keeps the procedural tint and
+    /// the world comes out the wrong colour.
+    public let tintGate: [UInt8]
 }
 
 /// compose the terrain atlas from a resource-pack ZIP (Faithful) — same
@@ -263,11 +269,15 @@ public func buildPackTerrainAtlas(zip: Data) -> PackTerrainAtlas? {
 
     var slices: [[UInt8]] = []
     slices.reserveCapacity(names.count)
+    var icon16: [[UInt8]] = []
+    icon16.reserveCapacity(names.count)
+    var tintGate = [UInt8](repeating: 1, count: names.count)
     var applied = 0
     for (i, name) in names.enumerated() {
         var px: [UInt8]
         if var img = resolved[i] {
             applied += 1
+            if !TINT_EXPECTED.contains(name) { tintGate[i] = 0 }
             if img.height > img.width { img = stripFrame(img, 0) }   // first anim frame
             px = scaleTo(img, res)
             if let bake = BAKE_TINT[name] { bakeTint(&px, bake) }
@@ -282,6 +292,7 @@ public func buildPackTerrainAtlas(zip: Data) -> PackTerrainAtlas? {
             }
         } else if let (top, bottom) = compositeSrcs[i] {
             applied += 1
+            if !TINT_EXPECTED.contains(name) { tintGate[i] = 0 }
             px = [UInt8](repeating: 0, count: res * res * 4)
             let half = res / 2
             let t = scaleTo(top, res), b = scaleTo(bottom, res)
@@ -297,6 +308,10 @@ public func buildPackTerrainAtlas(zip: Data) -> PackTerrainAtlas? {
             px = scaleNearest(RGBAImage(width: 16, height: 16, pixels: base.pixels[i]), to: res)
         }
         slices.append(px)
+        // the 16px copy the inventory and the UI canvas sample
+        icon16.append(res == 16 ? px : scaleTo(RGBAImage(width: res, height: res, pixels: px), 16))
     }
-    return PackTerrainAtlas(res: res, slices: slices, appliedTiles: applied)
+    return PackTerrainAtlas(res: res, slices: slices, appliedTiles: applied,
+                            icon16: BuiltAtlas(count: names.count, pixels: icon16, missing: []),
+                            tintGate: tintGate)
 }

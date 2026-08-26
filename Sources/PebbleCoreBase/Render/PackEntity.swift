@@ -52,3 +52,26 @@ public func pebPackEntityImage(zip: Data, rels: [String], stack: Bool = false,
     }
     return pebCompositeEntityLayers(layers, stack: stack)
 }
+
+/// every textures/item/*.png in a pack, at 16px, keyed by its base name —
+/// what the inventory and hotbar draw instead of the procedural icons. The
+/// Metal client has always installed these; without them the same diamond
+/// sword was hand-drawn on one platform and the pack's art on the other.
+public func pebPackItemIcons(zip: Data) -> [String: [UInt8]] {
+    guard let prefix = packTexPrefix(zip), let names = pebZipList(zip) else { return [:] }
+    let root = prefix + "item/"
+    var icons: [String: [UInt8]] = [:]
+    for path in names where path.hasPrefix(root) && path.hasSuffix(".png") {
+        guard let file = path.components(separatedBy: "/").last else { continue }
+        let base = String(file.dropLast(4))
+        guard let d = pebZipExtract(zip, name: path), let decoded = pebDecodePNG(d) else { continue }
+        var img = RGBAImage(width: decoded.width, height: decoded.height, pixels: decoded.pixels)
+        // animated items ship as a vertical strip; the first frame is the icon
+        if img.height > img.width, img.width > 0, img.height % img.width == 0 {
+            img = stripFrame(img, 0)
+        }
+        guard img.width == img.height else { continue }
+        icons[base] = scaleBox(img, to: 16)
+    }
+    return icons
+}

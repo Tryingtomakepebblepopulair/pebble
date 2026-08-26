@@ -538,6 +538,24 @@ static void* g_ultraUboMap;
 static VkDeviceSize g_ultraUboStride = 256;
 static float g_ultraU[64];            // the 256-byte block, filled from Swift
 
+// ---- the pack's GUI sheet ---------------------------------------------------
+// The canvas emits its vertex stream in segments: some sample the 1024x1024
+// canvas atlas, some the pack's GUI composite. Without the second texture the
+// Windows client drew the whole interface from the procedural atlas, so the
+// menus looked nothing like the Mac's.
+#define MAX_UI_SEGMENTS 64
+typedef struct {
+    int gui;        // 1 = sample the pack sheet
+    int first;      // first vertex
+    int count;
+} PbUISegment;
+static PbUISegment g_uiSegs[MAX_UI_SEGMENTS];
+static int g_uiSegCount;
+static VkImage g_guiImage;
+static VkDeviceMemory g_guiMem;
+static VkImageView g_guiView;
+static VkDescriptorSet g_guiSet;
+
 static void mat4_mul(float* out, const float* a, const float* b) {
     for (int c = 0; c < 4; c++) {
         for (int r = 0; r < 4; r++) {
@@ -2496,6 +2514,38 @@ int pb_vk_upload_sky_tex(int which, const unsigned char* rgba, int w, int h) {
 }
 
 static void set_full_viewport(VkCommandBuffer cmd);
+
+/// the pack's composed GUI sheet (RGBA8). One upload at startup; passing a
+/// null pointer drops back to the canvas atlas everywhere.
+int pb_vk_upload_gui_sheet(const unsigned char* rgba, int w, int h) {
+    if (!g_device) FAIL("renderer not created");
+    if (!rgba || w <= 0 || h <= 0) return 0;
+    if (g_guiImage) return 0;   // first upload wins, like the entity skins
+    if (upload_texture(rgba, w, h, 1, VK_IMAGE_VIEW_TYPE_2D,
+                       &g_guiImage, &g_guiMem, &g_guiView) != 0) return -1;
+    if (make_sampler_set(g_guiView, &g_guiSet) != 0) return -1;
+    return 0;
+}
+
+/// which slice of this frame's UI stream samples which texture. `segs` is
+/// pairs of (gui, firstVertex), in order; the last runs to the end.
+void pb_vk_ui_set_segments(const int* segs, int pairCount) {
+    g_uiSegCount = 0;
+    if (!segs || pairCount <= 0) return;
+    if (pairCount > MAX_UI_SEGMENTS) pairCount = MAX_UI_SEGMENTS;
+    for (int i = 0; i < pairCount; i++) {
+        g_uiSegs[i].gui = segs[i * 2];
+        g_uiSegs[i].first = segs[i * 2 + 1];
+        g_uiSegs[i].count = 0;
+    }
+    for (int i = 0; i < pairCount; i++) {
+        int end = (i + 1 < pairCount) ? g_uiSegs[i + 1].first : g_uiVertCount;
+        g_uiSegs[i].count = end - g_uiSegs[i].first;
+        if (g_uiSegs[i].count < 0) g_uiSegs[i].count = 0;
+    }
+    g_uiSegCount = pairCount;
+}
+
 static void wait_frame_slot(void);
 
 /// an extra chunk-stream mesh at a world origin: falling blocks / TNT and the
@@ -3155,11 +3205,27 @@ static void record_ui_draws(VkCommandBuffer cmd) {
     }
 
     if (g_uiVertCount > 0 && g_uiImageReady) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_uiLayout,
-                                0, 1, &g_uiSet, 0, NULL);
         VkDeviceSize zero = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &g_uiVbuf[f], &zero);
-        vkCmdDraw(cmd, (uint32_t)g_uiVertCount, 1, 0, 0);
+        // one draw per segment, switching between the canvas atlas and the
+        // pack's GUI sheet — the same split the Mac makes
+        if (g_uiSegCount > 0 && g_guiSet) {
+            int lastGui = -1;
+            for (int i = 0; i < g_uiSegCount; i++) {
+                if (g_uiSegs[i].count <= 0) continue;
+                if (g_uiSegs[i].gui != lastGui) {
+                    VkDescriptorSet set = g_uiSegs[i].gui ? g_guiSet : g_uiSet;
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_uiLayout,
+                                            0, 1, &set, 0, NULL);
+                    lastGui = g_uiSegs[i].gui;
+                }
+                vkCmdDraw(cmd, (uint32_t)g_uiSegs[i].count, 1, (uint32_t)g_uiSegs[i].first, 0);
+            }
+        } else {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_uiLayout,
+                                    0, 1, &g_uiSet, 0, NULL);
+            vkCmdDraw(cmd, (uint32_t)g_uiVertCount, 1, 0, 0);
+        }
     }
 }
 
@@ -3566,6 +3632,12 @@ void pb_vk_destroy(void) {
         g_partsBuf = NULL;
         g_partsMap = NULL;
         if (g_entSetLayout) vkDestroyDescriptorSetLayout(g_device, g_entSetLayout, NULL);
+        if (g_guiView) vkDestroyImageView(g_device, g_guiView, NULL);
+        if (g_guiImage) vkDestroyImage(g_device, g_guiImage, NULL);
+        if (g_guiMem) vkFreeMemory(g_device, g_guiMem, NULL);
+        g_guiView = NULL;
+        g_guiImage = NULL;
+        g_uiSegCount = 0;
         if (g_pipeUltra) vkDestroyPipeline(g_device, g_pipeUltra, NULL);
         if (g_pipeUltraBlur) vkDestroyPipeline(g_device, g_pipeUltraBlur, NULL);
         if (g_ultraLayout) vkDestroyPipelineLayout(g_device, g_ultraLayout, NULL);
@@ -3679,6 +3751,12 @@ void pb_vk_set_shadow(const float* shadowMat16, int enabled) {
 }
 void pb_vk_set_ultra(int on, const float* block64) {
     (void)on; (void)block64;
+}
+int pb_vk_upload_gui_sheet(const unsigned char* rgba, int w, int h) {
+    (void)rgba; (void)w; (void)h; return -1;
+}
+void pb_vk_ui_set_segments(const int* segs, int pairCount) {
+    (void)segs; (void)pairCount;
 }
 void pb_vk_begin_lines(void) {}
 void pb_vk_push_lines(const float* verts, int vertCount, int tris,

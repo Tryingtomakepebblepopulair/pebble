@@ -698,87 +698,26 @@ final class PackUI {
     ]
 
     init?(packs: [ResourcePack], device: MTLDevice) {
-        let W = 2048, H = 2560
-        var pixels = [UInt8](repeating: 0, count: W * H * 4)
-
+        // the compositing, the cell map and the font metrics are shared with
+        // the Vulkan client; only the upload is Metal's
         func load(_ rel: String) -> RGBAImage? {
             for p in packs {
-                if let d = p.file(p.texRoot + "\(rel).png"), let img = decodePNG(d) {
-                    return img
-                }
+                if let d = p.file(p.texRoot + "\(rel).png"), let img = decodePNG(d) { return img }
             }
             return nil
         }
-        func blit(_ img: RGBAImage, _ cellX: Int, _ cellY: Int, baseSize: Int) {
-            // rescale so content occupies baseSize*2 px in the cell
-            let target = baseSize * 2
-            let scaled = img.width == target ? img.pixels : scaleTo(img, target)
-            for y in 0..<min(target, 512) {
-                let dst = ((cellY + y) * W + cellX) * 4
-                let src = y * target * 4
-                pixels.replaceSubrange(dst..<(dst + min(target, 512) * 4),
-                                       with: scaled[src..<(src + min(target, 512) * 4)])
-            }
-        }
+        guard let built = pebComposePackUI(load) else { return nil }
+        sheets = built.sheets
+        fontWidths = built.fontWidths
 
-        let sources: [(String, String, Int)] = [
-            ("icons", "gui/icons", 256), ("widgets", "gui/widgets", 256),
-            ("bg", "gui/options_background", 16),
-            ("inventory", "gui/container/inventory", 256),
-            ("generic_54", "gui/container/generic_54", 256),
-            ("crafting_table", "gui/container/crafting_table", 256),
-            ("furnace", "gui/container/furnace", 256),
-            ("brewing_stand", "gui/container/brewing_stand", 256),
-            ("enchanting_table", "gui/container/enchanting_table", 256),
-            ("anvil", "gui/container/anvil", 256),
-            ("hopper", "gui/container/hopper", 256),
-            ("dispenser", "gui/container/dispenser", 256),
-            ("shulker_box", "gui/container/shulker_box", 256),
-            ("grindstone", "gui/container/grindstone", 256),
-            ("stonecutter", "gui/container/stonecutter", 256),
-            ("smithing", "gui/container/smithing", 256),
-            ("cartography_table", "gui/container/cartography_table", 256),
-            ("beacon", "gui/container/beacon", 256),
-            ("horse", "gui/container/horse", 256),
-        ]
-        for (key, rel, base) in sources {
-            if let img = load(rel) {
-                let cell = PackUI.CELLS[key]!
-                blit(img, cell.0, cell.1, baseSize: base)
-                sheets.insert(key)
-            }
-        }
-        // bitmap font: 16×16 grid of 8×8 glyphs; advance = trailing edge + 1
-        if let ascii = load("font/ascii") {
-            let cell = PackUI.CELLS["ascii"]!
-            blit(ascii, cell.0, cell.1, baseSize: 128)
-            sheets.insert("ascii")
-            let g = ascii.width / 16    // native glyph cell size
-            var widths = [Double](repeating: 6, count: 256)
-            for c in 0..<256 {
-                let gx = (c % 16) * g, gy = (c / 16) * g
-                var maxX = -1
-                for y in 0..<g {
-                    for x in 0..<g {
-                        if ascii.pixels[((gy + y) * ascii.width + gx + x) * 4 + 3] > 32 {
-                            if x > maxX { maxX = x }
-                        }
-                    }
-                }
-                let base = 8.0 / Double(g)
-                widths[c] = maxX < 0 ? 4 : (Double(maxX + 1) * base + 1)
-            }
-            widths[32] = 4   // space
-            fontWidths = widths
-        }
-        guard !sheets.isEmpty else { return nil }
-
-        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: W, height: H, mipmapped: false)
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,
+                                                          width: built.width, height: built.height,
+                                                          mipmapped: false)
         td.usage = .shaderRead
         guard let tex = device.makeTexture(descriptor: td) else { return nil }
-        pixels.withUnsafeBytes { raw in
-            tex.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0,
-                        withBytes: raw.baseAddress!, bytesPerRow: W * 4)
+        built.pixels.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake2D(0, 0, built.width, built.height), mipmapLevel: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: built.width * 4)
         }
         texture = tex
     }

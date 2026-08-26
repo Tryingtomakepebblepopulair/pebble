@@ -66,3 +66,71 @@ public func smokeSkinCoverageSuite() {
     check("no part samples mostly off its sheet", offSheet.isEmpty,
           offSheet.isEmpty ? "" : "off-sheet: \(offSheet.joined(separator: ", "))")
 }
+
+/// What a resource pack has to install, beyond the terrain tiles. The Windows
+/// client used to take only the tiles: no item icons, no UI sheet, and no
+/// tint gate — so every pack-supplied tile still got the procedural biome
+/// tint painted over art that was already coloured, and the whole world came
+/// out a different shade from the Mac's.
+public func smokePackInstallSuite() {
+    section("resource pack (icons + tint gate)")
+    let candidates = [
+        ProcessInfo.processInfo.environment["PEBBLE_PACK_ZIP"],
+        "packaging/Faithful 32x - 1.20.1.zip",
+        "../packaging/Faithful 32x - 1.20.1.zip",
+    ].compactMap { $0 }
+    guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }),
+          let zip = FileManager.default.contents(atPath: path),
+          let pack = buildPackTerrainAtlas(zip: zip) else {
+        check("pack zip found", false, "looked in: \(candidates.joined(separator: ", "))")
+        return
+    }
+    check("pack zip found", true)
+    check("terrain tiles resolved", pack.appliedTiles > 500,
+          "\(pack.appliedTiles)/\(pack.slices.count)")
+
+    // the icon sheet the inventory and the UI canvas draw from
+    check("icon16 covers every tile", pack.icon16.count == pack.slices.count,
+          "\(pack.icon16.count) vs \(pack.slices.count)")
+    let wrongSize = pack.icon16.pixels.filter { $0.count != 16 * 16 * 4 }.count
+    check("every icon is 16x16 RGBA", wrongSize == 0, "\(wrongSize) wrong")
+
+    // the gate: pack art is already coloured, so only the handful of tiles
+    // vanilla tints at render time may keep the biome tint
+    check("tint gate covers every tile", pack.tintGate.count == pack.slices.count)
+    let tinted = pack.tintGate.filter { $0 == 1 }.count
+    check("most pack tiles are gated off", tinted < pack.tintGate.count / 4,
+          "\(tinted) of \(pack.tintGate.count) still tinted")
+    check("some tiles still take the biome tint", tinted > 0,
+          "grass and foliage must stay tintable")
+
+    // the interface art: menus, containers and the bitmap font
+    guard let gui = pebPackUISheet(zip: zip) else {
+        check("pack GUI sheet composes", false)
+        return
+    }
+    check("pack GUI sheet composes", true)
+    check("GUI sheet is the expected size",
+          gui.width == PEB_PACK_UI_W && gui.height == PEB_PACK_UI_H,
+          "\(gui.width)x\(gui.height)")
+    check("every container sheet made it in", gui.sheets.count >= 19,
+          "\(gui.sheets.count) sheets")
+    check("the bitmap font came with it", gui.fontWidths?.count == 256)
+    // a proportional font: 'i' must be narrower than 'A', or every menu
+    // lays out at the wrong width
+    if let w = gui.fontWidths {
+        check("font advances are proportional", w[105] < w[65] && w[32] > 0,
+              "i=\(w[105]) A=\(w[65]) space=\(w[32])")
+    }
+    let filled = stride(from: 3, to: gui.pixels.count, by: 4).lazy.filter { gui.pixels[$0] > 0 }.count
+    check("GUI sheet is actually painted", filled > gui.width * gui.height / 10,
+          "\(filled * 100 / (gui.width * gui.height))% non-empty")
+
+    // the pack's own item art, keyed by item name
+    let items = pebPackItemIcons(zip: zip)
+    check("pack item icons load", items.count > 300, "\(items.count) icons")
+    check("item icons are 16x16 RGBA",
+          items.values.allSatisfy { $0.count == 16 * 16 * 4 })
+    check("a known item resolves", items["diamond_sword"] != nil,
+          items["diamond_sword"] == nil ? "no diamond_sword" : "")
+}

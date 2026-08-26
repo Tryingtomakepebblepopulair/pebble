@@ -160,6 +160,17 @@ void pb_vk_ui_push_image(int id, float x, float y, float w, float h,
 void pb_vk_ui_update_atlas(int x, int y, int w, int h, const unsigned char* rgba);
 void pb_vk_ui_set_frame(const float* verts, int floatCount, float screenW, float screenH);
 
+// the resource pack's composed GUI sheet (RGBA8) — menus, containers and the
+// bitmap font. Upload once at startup; without it the interface falls back to
+// the procedural canvas atlas.
+int pb_vk_upload_gui_sheet(const unsigned char* rgba, int w, int h);
+
+// which slice of the frame's UI stream samples which texture: `segs` is
+// pairCount pairs of (gui, firstVertex) in order, the last running to the end
+// of the stream. Call after pb_vk_ui_set_frame. No segments = one draw from
+// the canvas atlas, as before.
+void pb_vk_ui_set_segments(const int* segs, int pairCount);
+
 // human-readable reason for the last failure (static buffer)
 const char* pb_vk_last_error(void);
 

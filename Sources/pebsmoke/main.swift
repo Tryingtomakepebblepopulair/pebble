@@ -49,6 +49,7 @@ smokeAnimatorSuite()
 smokeShadowSuite()
 smokeMatrixSuite()
 smokeSkinCoverageSuite()
+smokePackInstallSuite()
 smokeNetProtocolSuite()
 smokeSocketTransportSuite()
 

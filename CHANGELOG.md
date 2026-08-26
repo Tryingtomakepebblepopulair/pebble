@@ -3,6 +3,27 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.2.2 — 2026-08-26 — Windows looks like the Mac
+
+A hunt for anything that still rendered differently on the two platforms. A
+resource pack installs seven things; the Windows client was taking one.
+
+- **The world was the wrong colour.** Pack tiles come pre-coloured, so only a
+  handful — grass, leaves, water — should still get the biome tint painted on
+  top. macOS knew which; Windows did not, and tinted 728 of 789 tiles that
+  the pack had already coloured.
+- **The interface is the pack's again.** Menus, containers, the inventory and
+  the bitmap font were all drawn from the built-in procedural art on Windows
+  while macOS showed the pack's, right down to the letter spacing.
+- **Item icons** — swords, tools, everything in your hotbar — now come from
+  the pack on Windows too, instead of the hand-drawn fallbacks.
+- **Block icons** in the inventory likewise.
+
+Everything above already existed in shared code; it simply was never wired up
+on the Windows side. The loaders now live in the core, so a pack behaves the
+same on both platforms, and new checks cover the tint gate, the icon sheet,
+the GUI composite and the font metrics.
+
 ## 1.2.1 — 2026-08-26 — mobs get their missing limbs back
 
 - **Twenty-seven mob parts were invisible.** Hoglins and zoglins walked around

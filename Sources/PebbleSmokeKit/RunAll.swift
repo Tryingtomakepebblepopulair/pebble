@@ -25,6 +25,7 @@ public func runPortableSmokeSuites() {
     smokeShadowSuite()
     smokeMatrixSuite()
     smokeSkinCoverageSuite()
+    smokePackInstallSuite()
     smokeNetProtocolSuite()
     smokeSocketTransportSuite()
     smokeSocialSuite()

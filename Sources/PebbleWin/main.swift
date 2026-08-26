@@ -340,6 +340,16 @@ let packZip = FileManager.default.contents(atPath: packPath)
 if let zipData = packZip, let pack = buildPackTerrainAtlas(zip: zipData) {
     terrainSlices = pack.slices
     terrainRes = pack.res
+    // the same three things the Mac installs alongside the terrain: item
+    // icons, the UI canvas's sheet, and the tint gate. Without the gate every
+    // pack tile keeps the procedural biome tint and the world is miscoloured.
+    initIcons(pack.icon16)
+    setUIAtlas(pack.icon16)
+    PACK_TINT_GATE = pack.tintGate
+    // the pack's own item art (swords, tools) on top of the block icons
+    let itemArt = pebPackItemIcons(zip: zipData)
+    itemIconOverride = itemArt.isEmpty ? nil : { name in itemArt[name] }
+    plog("icons: \(itemArt.count) item textures from the pack")
     plog("textures: Faithful — \(pack.appliedTiles)/\(pack.slices.count) tiles at \(pack.res)×")
 } else {
     let atlas = buildAtlas()
@@ -385,6 +395,22 @@ if let zipData = packZip {
 }
 
 entityView.packZip = packZip   // armour sheets, when the pack ships them
+
+// the pack's interface art: menus, containers and the bitmap font. Without
+// this the Windows client drew the whole UI from the procedural atlas while
+// the Mac showed the pack's.
+if let zipData = packZip, let gui = pebPackUISheet(zip: zipData) {
+    let rc = gui.pixels.withUnsafeBufferPointer {
+        pb_vk_upload_gui_sheet($0.baseAddress, Int32(gui.width), Int32(gui.height))
+    }
+    if rc == 0 {
+        ui.cv.hasGuiSheet = true
+        packFontWidths = gui.fontWidths
+        plog("GUI: pack sheet — \(gui.sheets.count) sheets\(gui.fontWidths != nil ? " + font" : "")")
+    } else {
+        plog("GUI: pack sheet upload failed: \(String(cString: pb_vk_last_error()))")
+    }
+}
 
 /// hand the sky pass its environment — the same gates as the Mac's scene pass
 func pushSky(_ game: GameCore, _ cam: CamState, _ sky: PebSky) {

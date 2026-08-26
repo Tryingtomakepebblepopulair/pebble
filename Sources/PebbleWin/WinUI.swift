@@ -39,6 +39,22 @@ func drawUIFrame(_ ui: UIManager, _ hud: HUD, _ game: GameCore) {
         pb_vk_ui_set_frame($0.baseAddress, Int32(ui.cv.verts.count),
                            Float(ui.cv.width), Float(ui.cv.height))
     }
+    // the canvas splits its stream by texture: the icon atlas by default, the
+    // pack's GUI sheet where the interface art is. The Mac binds a different
+    // texture per segment; so do we. Vertices are 8 floats each.
+    if !ui.cv.segments.isEmpty {
+        var pairs: [Int32] = []
+        pairs.reserveCapacity(ui.cv.segments.count * 2)
+        for seg in ui.cv.segments {
+            pairs.append(seg.gui ? 1 : 0)
+            pairs.append(Int32(seg.start / 8))
+        }
+        pairs.withUnsafeBufferPointer {
+            pb_vk_ui_set_segments($0.baseAddress, Int32(ui.cv.segments.count))
+        }
+    } else {
+        pb_vk_ui_set_segments(nil, 0)
+    }
 }
 
 extension WinHost {
