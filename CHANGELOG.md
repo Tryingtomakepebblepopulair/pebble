@@ -3,6 +3,28 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.2.1 — 2026-08-26 — mobs get their missing limbs back
+
+- **Twenty-seven mob parts were invisible.** Hoglins and zoglins walked around
+  on nothing — all four legs on both. Ghasts had none of their nine tentacles,
+  vexes and allays were each missing an arm, and the camel's tail, the
+  axolotl's tail, the tadpole's tail, the cod's tail and top fin, the allay's
+  wings and the tropical fish's side fins were all gone too.
+  The rigs and the animation were fine the whole time: each part was drawn
+  correctly, at a spot on its texture sheet that nothing had painted, so it
+  came out fully transparent. Two causes — a handful of paints simply used the
+  wrong coordinates, and every flat part (a fin, a wing, a tail) has its
+  visible faces offset down the sheet, which the paints did not account for.
+- **Mobs on Windows now use the resource pack's artwork**, the way macOS
+  always has. Until now the Windows client fell back to the built-in
+  procedural skins, so the same creeper genuinely looked different on the two
+  platforms.
+- Both fixes live in the shared core, so the two platforms move together.
+  A new check walks every rig on every mob and fails if any part would render
+  fully transparent — the kind of bug that is invisible to every other test,
+  because nothing errors: the geometry is right, the animation is right, and
+  the frame draws fine.
+
 ## 1.2.0 — 2026-08-25 — Windows
 
 - **Pebble runs on Windows.** Download `Pebble-Windows.zip` from the

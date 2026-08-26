@@ -12,8 +12,8 @@ x86_64-w64-mingw32-gcc -c -o /tmp/a.o -I Sources/CPebbleAudio/include Sources/CP
 # shaders + their push-constant block sizes (mirror these with _Static_assert)
 glslangValidator -V --target-env vulkan1.0 -q -o /dev/null Sources/CPebbleVulkan/shaders/sky.vert
 # the goldens
-swift run -c release pebsmoke        # macOS, 582
-swift run -c release pebsmokecore    # portable — what Windows CI runs, 547
+swift run -c release pebsmoke        # macOS, 585
+swift run -c release pebsmokecore    # portable — what Windows CI runs, 550
 ```
 
 `Sources/PebbleWin/*.swift` sits behind `#if os(Windows)` and never type-checks
@@ -52,6 +52,8 @@ screen draws its art through UI image quads instead.
 ## Other systems
 
 - [x] audio (module 10) — synthesized engine shared, winmm waveOut sink
+- [x] resource-pack mob textures (the Windows client used to fall back to
+      the procedural skins, so mobs looked different from the Mac's)
 - [x] terrain atlas, resource packs, sun/moon art
 - [x] falling blocks / TNT, block-break crack overlay
 - [x] entity animation (walk cycle, head turn, limb swing)

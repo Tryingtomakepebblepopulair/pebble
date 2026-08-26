@@ -12,7 +12,7 @@ Owner: **Xavi** — a young Dutch hobbyist. Explain things to him **simply and i
 
 **2026-07-12 — the Windows client is a real, playable Pebble.** It boots the actual Pebble UI (title screen, options, multiplayer/direct-connect lobby), renders terrain with Faithful textures, draws mobs and other players, streams chunks, takes input, and joins Mac-hosted worlds over direct IP. Both CI lanes are green. Known gaps on Windows: no audio (PORTING 10), entities are in bind pose (no animator yet — that still lives Apple-side in `EntityRendererM`), no shadows/bloom/ultra, no first-person viewmodel.
 
-macOS is unchanged: same app, same saves, same green checks — 582 of them now.
+macOS is unchanged: same app, same saves, same green checks — 585 of them now.
 
 ## Where things live
 
@@ -26,7 +26,7 @@ macOS is unchanged: same app, same saves, same green checks — 582 of them now.
 | `CPebbleAudio` | Audio sink behind a `pb_audio_*` C ABI: winmm's waveOut (plain C, no COM, no SDK). Pebble synthesizes every sound, so a platform only hands over finished stereo samples. | Windows (stubs elsewhere) |
 | `CSQLite` / `CCodecs` | Project-owned SQLite, lodepng + miniz — same engine/codecs on every platform. | all |
 | `PebbleSmokeKit` | The shared golden suites both smoke runners execute. | all |
-| `pebsmoke` / `pebsmokecore` | macOS full suite (582) / portable suite (547) — the one Windows CI runs. | macOS / all |
+| `pebsmoke` / `pebsmokecore` | macOS full suite (585) / portable suite (550) — the one Windows CI runs. | macOS / all |
 | `pebserver` | Headless SMP server: 20 TPS, no host player, direct IP everywhere, Bonjour on macOS. | all |
 
 ## Rules that must not break
@@ -45,7 +45,7 @@ macOS is unchanged: same app, same saves, same green checks — 582 of them now.
 ```
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
-swift run pebsmoke                # macOS: 582 checks (self-assigns a temp data root)
+swift run pebsmoke                # macOS: 585 checks (self-assigns a temp data root)
 swift run pebsmokecore            # portable: 525 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server

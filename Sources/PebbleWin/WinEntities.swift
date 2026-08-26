@@ -110,9 +110,20 @@ final class EntityView {
             geomIds[key] = -1
             return nil
         }
-        // another player's custom skin, decoded with the portable codec
+        // the resource pack's art for this mob, exactly as the Mac picks it —
+        // without this the same creeper looked procedural here and Faithful
+        // there. The procedural skin stays the fallback.
         var pixels = geo.skin.data
         var texW = geo.skin.w, texH = geo.skin.h
+        if let zip = packZip, !geo.model.packTex.isEmpty,
+           let img = pebPackEntityImage(zip: zip, rels: geo.model.packTex,
+                                        stack: geo.model.packTexStack,
+                                        tints: geo.model.packTexTints),
+           img.width * geo.model.texH == img.height * geo.model.texW {
+            pixels = img.pixels
+            texW = img.width
+            texH = img.height
+        }
         if let blob = skinPNG, let img = pebDecodePNG(blob),
            img.width * geo.model.texH == img.height * geo.model.texW {
             pixels = img.pixels

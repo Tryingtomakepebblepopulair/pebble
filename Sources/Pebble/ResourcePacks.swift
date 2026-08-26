@@ -622,29 +622,10 @@ func packEntityImage(_ rels: [String], stack: Bool = false, tints: [Int] = []) -
         }
         return nil
     }
-    guard var base = load(rels[0]) else { return nil }
-    if stack {
-        // vertical sheet: each entry appended below the previous (sheep + fur)
-        for rel in rels.dropFirst() {
-            guard let next = load(rel), next.width == base.width else { return nil }
-            base = RGBAImage(width: base.width, height: base.height + next.height,
-                             pixels: base.pixels + next.pixels)
-        }
-        return base
-    }
-    for rel in rels.dropFirst() {
-        guard let over = load(rel), over.width == base.width, over.height == base.height else { continue }
-        for i in stride(from: 0, to: base.pixels.count, by: 4) {
-            let a = Int(over.pixels[i + 3])
-            if a == 0 { continue }
-            for c in 0..<3 {
-                let o = Int(over.pixels[i + c]), b = Int(base.pixels[i + c])
-                base.pixels[i + c] = UInt8((o * a + b * (255 - a)) / 255)
-            }
-            base.pixels[i + 3] = 255
-        }
-    }
-    return base
+    // the merge itself is shared with the Vulkan client
+    var layers: [RGBAImage] = []
+    for rel in rels { if let img = load(rel) { layers.append(img) } }
+    return pebCompositeEntityLayers(layers, stack: stack)
 }
 
 func applyResourcePacks(_ userPacks: [String], game: GameCore, renderer: WorldRenderer, ui: UIManager) {

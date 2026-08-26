@@ -435,6 +435,7 @@ func registerAllModels() {
             s.box(0, 26, 5, 21, 5, shadeColor(c, 0.92), 0.1)
             s.box(58, 16, 5, 21, 5, shadeColor(c, 0.92), 0.1)
             s.box(94, 16, 5, 21, 5, shadeColor(c, 0.92), 0.1)
+            s.box(122, 0, 3, 14, 0, shadeColor(c, 0.85), 0.1)             // tail
         },
         packTex: ["entity/camel/camel.png"]))
 
@@ -575,6 +576,7 @@ private func registerModels2() {
         s.box(0, 10, 3, 4, 2, 0x7a8aa8, 0.12)
         s.box(0, 16, 3, 5, 2, 0x7a8aa8, 0.12)
         s.box(23, 0, 2, 4, 2, 0x7a8aa8, 0.12)
+        s.box(23, 6, 2, 4, 2, 0x7a8aa8, 0.12)   // armL — its own UV row
         s.fill(16, 22, 8, 5, 0xb8c8d8, 0.1)
     }
     flyBiped("allay", 1, box(0, -5, 0, 0, 5, 8, 16, 14), 23, 23, 0.45, ["entity/allay/allay.png"]) { s in
@@ -583,7 +585,8 @@ private func registerModels2() {
         s.box(0, 10, 3, 4, 2, 0x3ca8c8, 0.1)
         s.box(0, 16, 3, 5, 2, 0x3ca8c8, 0.1)
         s.box(23, 0, 1, 4, 2, 0x3ca8c8, 0.1)
-        s.fill(16, 14, 8, 5, 0xc8e8f0, 0.08)
+        s.box(23, 6, 1, 4, 2, 0x3ca8c8, 0.1)    // armL — its own UV row
+        s.fill(16, 22, 16, 5, 0xc8e8f0, 0.08)   // wings: flat quad, faces sit at v + d
     }
 
     // ILLAGERS
@@ -799,6 +802,9 @@ private func registerModels2() {
             // closed eyes + mouth on front
             s.rect(16 + 3, 16 + 5, 2, 2, 0x3c3c3c); s.rect(16 + 11, 16 + 5, 2, 2, 0x3c3c3c)
             s.rect(16 + 6, 16 + 9, 4, 2, 0x3c3c3c)
+            // all nine tentacles share uv (0,0), a corner the body's unwrap
+            // never touches — unpainted, they rendered as nothing
+            s.box(0, 0, 2, 9, 2, 0xd8d8d8, 0.06)
         }, packTex: ["entity/ghast/ghast.png"]))
     // vanilla magma cube rig (64×32) — eight 1-tall slices + molten core
     M2("magma_cube", MobModel(
@@ -901,8 +907,9 @@ private func registerModels2() {
             s.box(0, 0, 2, 4, 7, c, 0.12)
             s.box(11, 0, 2, 4, 3, shadeColor(c, 0.95), 0.12)
             s.px(12, 2, 0x1c1c1c)
-            s.fill(20, 1, 7, 5, shadeColor(c, 0.9), 0.1)
-            s.fill(20, 10, 5, 2, shadeColor(c, 0.9), 0.1)
+            s.fill(20, 7, 12, 4, shadeColor(c, 0.9), 0.1)   // tail: flat quad, faces at v + d
+            s.fill(20, 14, 8, 1, shadeColor(c, 0.9), 0.1)   // top fin: same
+
         },
         packTex: ["entity/fish/cod.png"]))
     M2("salmon", MobModel(
@@ -940,6 +947,8 @@ private func registerModels2() {
             s.px(2, 5, 0x1c1c1c)
             s.fill(24, 0, 4, 3, 0xf8f8f8, 0.08)
             s.fill(16, 0, 6, 4, 0xf8f8f8, 0.08)
+            s.box(2, 12, 2, 2, 0, 0xe8743c, 0.08)   // finL
+            s.box(2, 16, 2, 2, 0, 0xe8743c, 0.08)   // finR
         },
         packTex: ["entity/fish/tropical_a.png", "entity/fish/tropical_a_pattern_1.png"],
         packTexTints: [0xF6603A, 0xF8F8F8]))
@@ -1036,7 +1045,7 @@ private func registerModels2() {
             s.fill(11, 40, 3, 7, 0xe87aa8, 0.1); s.fill(0, 40, 3, 7, 0xe87aa8, 0.1)
             s.fill(3, 37, 8, 3, 0xe87aa8, 0.1)
             s.fill(2, 17, 9, 5, 0xe87aa8, 0.08)
-            s.fill(2, 19, 12, 5, 0xe87aa8, 0.08)
+            s.fill(2, 31, 24, 5, 0xe87aa8, 0.08)   // tail: flat quad, faces sit at v + d
             s.fill(2, 13, 3, 5, c, 0.08)
         },
         packTex: ["entity/axolotl/axolotl_lucy.png"]))
@@ -1104,6 +1113,7 @@ private func registerModels2() {
         anim: "fish", scale: 1,
         paint: { s in
             s.box(0, 0, 3, 2, 3, 0x6a5a4c, 0.12)
+            s.fill(0, 7, 14, 2, 0x5a4a3c, 0.12)   // tail: flat quad, faces at v + d
         },
         packTex: ["entity/tadpole/tadpole.png"]))
 
@@ -1478,7 +1488,13 @@ private func hoglinPaint(_ s: EntitySkin) {
     s.px(9 + 2, 9 + 2, 0x1c1c1c); s.px(9 + 11, 9 + 2, 0x1c1c1c)
     s.box(50, 0, 1, 4, 1, 0xe8e0d0)
     s.box(48, 0, 12, 11, 19, shadeColor(c, 0.95), 0.14)
-    s.box(0, 20, 4, 9, 4, shadeColor(c, 0.9), 0.12)
+    // the legs, at the UVs the rig actually samples. They used to be painted
+    // at (0,20), which no part references, so all four came out transparent.
+    let legC = shadeColor(c, 0.9)
+    s.box(66, 42, 6, 14, 6, legC, 0.12)   // legFR
+    s.box(41, 42, 6, 14, 6, legC, 0.12)   // legFL
+    s.box(21, 45, 5, 11, 5, legC, 0.12)   // legBR
+    s.box(0, 45, 5, 11, 5, legC, 0.12)    // legBL
 }
 
 private func guardianPaint(_ s: EntitySkin) {
