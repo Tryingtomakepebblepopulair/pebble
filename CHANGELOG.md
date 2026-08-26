@@ -3,6 +3,44 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.2.0 — 2026-08-25 — Windows
+
+- **Pebble runs on Windows.** Download `Pebble-Windows.zip` from the
+  [releases page](../../releases/latest), unzip it anywhere, run `Pebble.exe`.
+  Nothing to install: the Swift runtime travels with it. It is the same game,
+  not a cut-down port — the same worldgen from the same seeds, the same mobs,
+  the same LAN and SMP multiplayer, and worlds that are bit-identical to the
+  Mac's. A Windows player and a Mac player can share a world.
+  Both platforms warn once on first launch because neither build is signed;
+  every download ships a text file with the one click that gets past it.
+- **The Windows renderer is finished.** The Vulkan backend went from three
+  passes to fifteen and now matches Metal one for one: the sky dome with
+  stars, sun and moon and drifting clouds; particles; dropped items; the
+  block-selection outline; soft shadows under mobs; sun shadows across the
+  terrain; the first-person hand and whatever it is holding; mobs that
+  actually walk, turn their heads and wear their armour; and the full post
+  chain — bloom, tonemapping, and the ultra preset's ambient occlusion and
+  god rays.
+- **Sound on Windows.** Pebble synthesizes every effect from oscillators
+  rather than shipping audio files, so Windows gets the identical engine —
+  same footsteps, same creeper hiss, same cave reverb, same generative music
+  and jukebox discs.
+- **Guests no longer bleed to death in multiplayer.** A guest who took any
+  damage at all — one heart from a fall, a single hit — would keep losing a
+  heart per tick until they died, because the host was reading its own mirror
+  of their health back to them as fresh damage. This affected real games, not
+  just the test suite.
+- **Clouds are clouds again** on both platforms. The cloud mask was sampled
+  through a clamp-to-edge sampler, so everything past the first twelfth of the
+  sky was a smear of one row of pixels stretched to the horizon.
+- **Jukebox discs start on time.** A disc schedules around 600 notes up front
+  and the voice limit was evicting the oldest — which are the ones due to play
+  — leaving the first ~23 seconds silent.
+- **Easier to share.** `pebble release` builds a signed, notarized zip when a
+  Developer ID is configured, `pebble fix` unblocks a downloaded app macOS has
+  quarantined, and pushing a version tag makes CI build and publish both
+  platforms by itself.
+
 ## 1.1.0 — 2026-07-02 — multiplayer (LAN + servers + friends), custom skins, speed slider
 
 - **LAN multiplayer.** Play together on the same WiFi: the host presses

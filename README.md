@@ -37,7 +37,7 @@ Pebble is an original fan re-creation inspired by Minecraft: Java Edition 1.20. 
 
 Every zip ships a short text file with the same instructions. Prefer to build it yourself? One command: see [Install](#install--run).
 
-> **Pebble 1.1.0 is a beta.** The engine is pinned by 582 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
+> **Pebble 1.2.0 is a beta.** The engine is pinned by 582 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
 
 ## Sharing a build
 

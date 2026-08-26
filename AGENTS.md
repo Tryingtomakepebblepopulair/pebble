@@ -12,7 +12,7 @@ Owner: **Xavi** — a young Dutch hobbyist. Explain things to him **simply and i
 
 **2026-07-12 — the Windows client is a real, playable Pebble.** It boots the actual Pebble UI (title screen, options, multiplayer/direct-connect lobby), renders terrain with Faithful textures, draws mobs and other players, streams chunks, takes input, and joins Mac-hosted worlds over direct IP. Both CI lanes are green. Known gaps on Windows: no audio (PORTING 10), entities are in bind pose (no animator yet — that still lives Apple-side in `EntityRendererM`), no shadows/bloom/ultra, no first-person viewmodel.
 
-macOS is unchanged and remains the default release path: same app, same saves, same 559 green checks.
+macOS is unchanged: same app, same saves, same green checks — 582 of them now.
 
 ## Where things live
 
@@ -21,18 +21,18 @@ macOS is unchanged and remains the default release path: same app, same saves, s
 | `PebbleCoreBase` | The portable core: simulation, worldgen, registries, entities, items, systems, mesher, render ABI, UI stack, protocol + social types, settings, codecs glue. **Foundation only.** | all |
 | `PebbleCore` | Apple-side runtime: `GameCore` orchestration, SQLite `SaveDB`, Network.framework/Bonjour adapter, `MathXApple` (simd/Mat4/Frustum). Re-exports Base via `Reexport.swift`. | macOS |
 | `Pebble` | The macOS app: AppKit shell, Metal renderer, AVFoundation audio, gear/entity renderers. | macOS |
-| `PebbleWin` | The Windows client: Win32 window + message pump, input, lobby, host bridge, entity/UI views. | Windows |
+| `PebbleWin` | The Windows client: Win32 window + message pump, input, lobby, host bridge, and the entity/UI/detail/viewmodel/audio views. | Windows |
 | `CPebbleVulkan` | Vulkan renderer behind a `pb_vk_*` C ABI; loads `vulkan-1.dll` at runtime (no SDK needed). Embedded SPIR-V in `shaders_spv.h` — edit `shaders/*.vert|frag`, recompile with `glslangValidator -V --target-env vulkan1.0`, then `python3 shaders/embed.py`. The `.spv` files are checked in, so a build never needs the compiler. | Windows (stubs elsewhere) |
 | `CPebbleAudio` | Audio sink behind a `pb_audio_*` C ABI: winmm's waveOut (plain C, no COM, no SDK). Pebble synthesizes every sound, so a platform only hands over finished stereo samples. | Windows (stubs elsewhere) |
 | `CSQLite` / `CCodecs` | Project-owned SQLite, lodepng + miniz — same engine/codecs on every platform. | all |
 | `PebbleSmokeKit` | The shared golden suites both smoke runners execute. | all |
-| `pebsmoke` / `pebsmokecore` | macOS full suite (559) / portable suite (525). | macOS / all |
+| `pebsmoke` / `pebsmokecore` | macOS full suite (582) / portable suite (547) — the one Windows CI runs. | macOS / all |
 | `pebserver` | Headless SMP server: 20 TPS, no host player, direct IP everywhere, Bonjour on macOS. | all |
 
 ## Rules that must not break
 
 1. **The goldens are frozen.** `goldens/*.json` pins worldgen, registries, physics and protocol bit-for-bit. Never set `PEBBLE_REGOLD`; CI refuses it and gates on `git diff --exit-code goldens/`. If a change moves a golden, the change is wrong until proven otherwise — and then it is a separate, reviewed commit.
-2. **macOS stays green.** The Mac app is the release path. Never destabilize it to make Windows work.
+2. **macOS stays green.** Both platforms ship now, but the Mac is where the game is developed and played daily. Never destabilize it to make Windows work.
 3. **No fake portability.** Empty targets, runtime-fatal stubs, or skipped suites that pretend to pass are worse than an honest red lane. If a Windows lane cannot be made green in-session, remove the lane and document why.
 4. **Nothing Apple enters `PebbleCoreBase`.** No AppKit, Metal, AVFoundation, Network, ImageIO, CoreGraphics, Compression, simd, `CFAbsoluteTimeGetCurrent`, or hard-coded Application Support paths. Use the seams: `PebCodecs` for PNG/ZIP, `monotonicNow()` for time, `Mat4f` for matrices, `vcSupportDir()`/`vcOverrideDataDir()` for storage, the socket transport for networking.
 5. **Storage is injectable.** Anything that writes must resolve through `vcSupportDir()`, which honors `PEBBLE_DATA_DIR`. Tests and CI pin a temp root **before** constructing `GameCore`, `SaveDB`, settings or social stores.
@@ -45,7 +45,7 @@ macOS is unchanged and remains the default release path: same app, same saves, s
 ```
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
-swift run pebsmoke                # macOS: 559 checks (self-assigns a temp data root)
+swift run pebsmoke                # macOS: 582 checks (self-assigns a temp data root)
 swift run pebsmokecore            # portable: 525 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server
