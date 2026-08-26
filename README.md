@@ -23,12 +23,17 @@ Pebble is an original fan re-creation inspired by Minecraft: Java Edition 1.20. 
 
 ## ⬇ Download
 
-### **[→ Get Pebble — latest release](../../releases/latest)**
+### ⬇ **[Windows — download Pebble](https://github.com/Tryingtomakepebblepopulair/pebble/releases/latest/download/Pebble-Windows.zip)** · ⬇ **[macOS — download Pebble](https://github.com/Tryingtomakepebblepopulair/pebble/releases/latest/download/Pebble-macOS.zip)**
+
+Both links always serve the newest version. Windows 10/11 (64-bit) and macOS
+on Apple silicon.
 
 | | |
 |---|---|
-| **Windows** 10/11 (64-bit) | Download `Pebble-Windows.zip`, unzip anywhere, run **Pebble.exe**. |
-| **macOS** (Apple silicon) | Download `Pebble-macOS.zip`, unzip, drag **Pebble** into Applications. |
+| **Windows** | Unzip anywhere, run **Pebble.exe**. Nothing to install — the runtime travels with it. |
+| **macOS** | Unzip, drag **Pebble** into your Applications folder. |
+
+Or browse [all releases](../../releases/latest).
 
 **The first launch shows a security warning on both platforms. That is expected** — neither build is code-signed, because signing needs a paid developer account on each platform. Each OS asks once:
 

@@ -99,21 +99,36 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: downloads/**/*.zip
-          generate_release_notes: true
+          # a plain, inviting title beats the bare tag on the releases page
+          name: Pebble ${{ github.ref_name }}
+          generate_release_notes: false
           body: |
             ## Download
 
-            - **Windows** — `Pebble-Windows.zip`. Unzip anywhere, run `Pebble.exe`.
-            - **macOS** (Apple silicon) — `Pebble-macOS.zip`. Unzip, drag Pebble to Applications.
+            ### ⬇ **[Windows — download Pebble](https://github.com/${{ github.repository }}/releases/latest/download/Pebble-Windows.zip)**
+            ### ⬇ **[macOS (Apple silicon) — download Pebble](https://github.com/${{ github.repository }}/releases/latest/download/Pebble-macOS.zip)**
 
-            ### The first launch shows a warning. That is expected.
+            Those links always give you the newest version, so they keep working.
 
-            Neither build is code-signed — that needs a paid developer account
-            on both platforms — so each OS asks once before it trusts the app.
+            **Windows:** unzip anywhere → run `Pebble.exe`. Nothing to install.
+            **macOS:** unzip → drag **Pebble** into your Applications folder.
 
-            **Windows:** "Windows protected your PC" → **More info** → **Run anyway**.
+            ---
 
-            **macOS:** double-click Pebble and let it be refused, then
-            System Settings → Privacy & Security → scroll down → **Open Anyway**.
+            ### The first launch shows a security warning. That is normal.
 
-            Each zip contains a short text file with the same instructions.
+            Neither build is code-signed — that needs a paid developer account on
+            each platform, and Pebble is a hobby project. Your computer asks once,
+            then never again.
+
+            **Windows:** "Windows protected your PC" → click **More info** → **Run anyway**.
+
+            **macOS:** double-click Pebble and let it be refused. Then open
+            **System Settings → Privacy & Security**, scroll to the bottom, and
+            click **Open Anyway**.
+
+            Each download contains a text file repeating these steps.
+
+            ---
+
+            What changed: see the [changelog](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md).
