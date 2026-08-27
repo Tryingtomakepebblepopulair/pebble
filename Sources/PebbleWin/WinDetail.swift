@@ -58,10 +58,10 @@ final class DetailView {
         let w = game.world
         for e in w.entities {
             if e.dead { continue }
-            // first person: the Mac skips the player's whole entity pass,
-            // shadow included, and so does WinEntities
-            guard let ent = e as? Entity, ent is LivingEntity,
-                  ent !== game.player else { continue }
+            // the Mac skips the player's whole entity pass — shadow included —
+            // only in first person
+            guard let ent = e as? Entity, ent is LivingEntity else { continue }
+            if ent === game.player && game.perspective == 0 { continue }
             let dx = ent.x - camX, dz = ent.z - camZ
             if dx * dx + dz * dz > 64 * 64 { continue }
             let ix = ent.prevX + (ent.x - ent.prevX) * partial

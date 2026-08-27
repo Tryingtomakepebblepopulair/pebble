@@ -524,17 +524,17 @@ mainLoop: while true {
     // camera + world + entities
     if game.hasWorld(), let p = game.player {
         detail.particles.tick(game.world)
-        let xi = p.prevX + (p.x - p.prevX) * partial
-        let yi = p.prevY + (p.y - p.prevY) * partial
-        let zi = p.prevZ + (p.z - p.prevZ) * partial
-        let eyeY = yi + (p.eyeY() - p.y)
-        let dirX = Float(detCos(p.pitch) * -detSin(p.yaw))
-        let dirY = Float(detSin(-p.pitch))
-        let dirZ = Float(detCos(p.pitch) * detCos(p.yaw))
+        // the shared camera: interpolation, view bobbing, the third-person
+        // pull-back and its block clipping all live in camState. Deriving the
+        // eye straight off the player skipped every one of them.
+        let cam = game.camState(partial, timeSec: now - t0)
+        let xi = cam.x, eyeY = cam.y, zi = cam.z
+        let dirX = Float(detCos(cam.pitch) * -detSin(cam.yaw))
+        let dirY = Float(detSin(-cam.pitch))
+        let dirZ = Float(detCos(cam.pitch) * detCos(cam.yaw))
 
         // the SAME sky/day-light computation as the Mac — synced worlds
         // look identical at the same moment
-        let cam = game.camState(partial, timeSec: now - t0)
         let sky = pebSkyColors(game.world, nightVision: cam.nightVision)
         let dayLight = Float(sky.dayLight)
 
@@ -606,8 +606,13 @@ mainLoop: while true {
                            dayLight: sky.dayLight, partial: partial)
         entityView.frame(game: game, camX: xi, camY: eyeY, camZ: zi,
                          dayLight: dayLight, partial: partial, timeSec: now - t0)
-        // the hand goes last, over everything, on the projection alone
-        viewmodel.frame(game: game, proj: proj, dayLight: dayLight)
+        // the hand goes last, over everything, on the projection alone —
+        // and only in first person, like the Mac
+        if game.perspective == 0 {
+            viewmodel.frame(game: game, proj: proj, dayLight: dayLight)
+        } else {
+            pb_vk_begin_viewmodel()
+        }
         drawUIFrame(ui, hud, game)
         // the Mac clears its scene pass to the fog colour and paints the sky
         // dome over it; where the dome sits out a frame (underwater, lava,

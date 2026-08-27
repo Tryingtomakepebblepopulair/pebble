@@ -3,6 +3,20 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.2.4 — 2026-08-26 — the camera, and water
+
+- **Third-person view works on Windows.** F5 was not even wired up as a key,
+  and the camera was taken straight off the player rather than from the
+  shared camera, so it could not have pulled back anyway. Now F5 cycles
+  through the three views exactly as on the Mac, your own body is drawn when
+  the camera is behind you, and the hand disappears when it should.
+- **View bobbing** works on Windows for the same reason — it lives in that
+  shared camera and was being skipped.
+- **Water matches.** The Windows renderer had been thickening water by 40% to
+  make up for a missing highlight, which made it heavier than the Mac's. The
+  real effect — the sun's glint and the glancing-angle sheen, under the ultra
+  preset — is ported now, and the fudge is gone.
+
 ## 1.2.3 — 2026-08-26 — Intel Macs
 
 - **The Mac download now runs on Intel Macs too.** It was built for Apple

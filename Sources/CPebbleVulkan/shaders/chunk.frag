@@ -26,7 +26,7 @@ layout(set = 0, binding = 0) uniform sampler2D uAtlas;
 layout(set = 0, binding = 1) uniform sampler2DShadow uShadow;
 layout(set = 0, binding = 2) uniform Shadow {
     mat4 mat;
-    vec4 params;    // x = on, y = texel size
+    vec4 params;    // x = shadows on, y = texel size, z = ultra on
 } shadow;
 
 layout(location = 0) out vec4 outColor;
@@ -79,8 +79,33 @@ void main() {
 
     vec3 col = tex.rgb * vColor * shadowTerm;
     float alpha = tex.a * pc.fog.w;
-    // water reads too thin without the Metal path's fresnel — thicken it
-    if (vAnim == 1u) { alpha = min(1.0, alpha * 1.4); }
+
+    // ultra: specular sun glint + fresnel on water (anim 1) — mirrors the
+    // same branch in Shaders.swift chunk_fs. This used to be faked by
+    // thickening the alpha 1.4x, which made Vulkan water heavier than the
+    // Mac's in the non-ultra case where neither has a fresnel at all.
+    float ultraOn = shadow.params.z;
+    if (ultraOn > 0.5 && vAnim == 1u && dayLight > 0.02) {
+        vec2 wp = vWorldPos.xz;
+        float t2 = time * 1.3;
+        // two-octave procedural wave normal
+        float h1 = sin(wp.x * 1.7 + t2) * cos(wp.y * 1.3 - t2 * 0.8);
+        float h2 = sin(wp.x * 3.9 - t2 * 1.7 + wp.y * 2.7) * 0.45;
+        vec3 n = normalize(vec3((h1 + h2) * 0.18, 1.0, (h1 - h2) * 0.18));
+        // sun dir = shadow matrix z-row (light-space depth axis); vWorldPos is
+        // camera-relative so the view vector is just -vWorldPos
+        vec3 sr = vec3(shadow.mat[0].z, shadow.mat[1].z, shadow.mat[2].z);
+        vec3 sunD = (shadow.params.x > 0.5 && dot(sr, sr) > 1e-6)
+            ? normalize(sr) : normalize(vec3(-0.45, 0.85, 0.18));
+        if (sunD.y < 0.0) sunD = -sunD;
+        vec3 viewD = normalize(-vWorldPos);
+        vec3 hv = normalize(sunD + viewD);
+        float spec = pow(max(dot(n, hv), 0.0), 90.0) * 1.6;
+        float fres = pow(1.0 - clamp(viewD.y, 0.0, 1.0), 3.0);
+        col += vec3(1.0, 0.95, 0.82) * spec * dayLight * shadowTerm;
+        col += pc.fogColor.rgb * fres * 0.18 * dayLight;
+        alpha = clamp(alpha + spec * 0.5 + fres * 0.1, 0.0, 1.0);
+    }
 
     float fogStart = pc.fog.x, fogEnd = pc.fog.y;
     float fog = clamp((vFogDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);

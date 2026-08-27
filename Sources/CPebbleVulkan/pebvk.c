@@ -3365,7 +3365,7 @@ static void stash_shadow(void) {
     float* params = (float*)(dst + 64);
     params[0] = g_shadowOn ? 1.0f : 0.0f;
     params[1] = 1.0f / (float)SHADOW_SIZE;
-    params[2] = 0.0f;
+    params[2] = g_ultraOn ? 1.0f : 0.0f;   // the water glint branch reads this
     params[3] = 0.0f;
 }
 

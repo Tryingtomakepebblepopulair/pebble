@@ -154,7 +154,10 @@ final class EntityView {
         pb_vk_begin_entities()
         guard game.hasWorld() else { return }
         for eref in game.world.entities {
-            guard let e = eref as? Entity, e is LivingEntity, e !== game.player, !e.dead else { continue }
+            // the local player is only hidden in first person — in third
+            // person you are looking at your own back
+            guard let e = eref as? Entity, e is LivingEntity, !e.dead else { continue }
+            if e === game.player && game.perspective == 0 { continue }
             let dx = e.x - camX, dz = e.z - camZ
             if dx * dx + dz * dz > 64 * 64 { continue }
             let key = e.skinPNG != nil ? "player#\(e.id)" : e.type

@@ -23,6 +23,8 @@ func pebKeyName(_ vk: WPARAM, _ lParam: LPARAM) -> String? {
     case VK_LEFT: return "ArrowLeft"
     case VK_RIGHT: return "ArrowRight"
     case VK_OEM_2: return "Slash"
+    case VK_F1...VK_F12:                  // F5 cycles the camera perspective
+        return "F" + String(v - VK_F1 + 1)
     case VK_OEM_MINUS: return "Minus"
     case VK_OEM_PLUS: return "Equal"
     case VK_F1...VK_F12:
@@ -40,17 +42,5 @@ func pebKeyName(_ vk: WPARAM, _ lParam: LPARAM) -> String? {
     }
 }
 
-/// keys the world/player may see — screens (inventory, chat, pause) have no
-/// portable UI yet, so keys that would open one stay client-side for now
-let worldSafeKeys: Set<String> = [
-    "KeyW", "KeyA", "KeyS", "KeyD",       // move
-    "Space",                              // jump
-    "ShiftLeft", "ShiftRight",            // sneak
-    "ControlLeft", "ControlRight",        // sprint
-    "Digit1", "Digit2", "Digit3", "Digit4", "Digit5",
-    "Digit6", "Digit7", "Digit8", "Digit9",   // hotbar
-    "KeyQ",                               // drop
-    "KeyF",                               // swap offhand
-]
 
 #endif

@@ -129,7 +129,7 @@ final class WinHost: GameHost {
     func pushToast(_ adv: AdvancementDef) { hud.pushToast(adv) }
     func setBossBars(_ bars: [BossBarInfo]) { hud.bossBars = bars }
 
-    // ---- audio: module 10 — silent for now -----------------------------------
+    // ---- audio: the shared synth, fed to waveOut (PORTING module 10) --------
     func playSound(_ name: String, _ x: Double, _ y: Double, _ z: Double, _ volume: Double, _ pitch: Double) {
         // jukebox discs get their own voice class so stopDisc can cut them
         // (the same prefix and the same full name the Mac hands over)

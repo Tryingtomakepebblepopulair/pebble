@@ -1,6 +1,6 @@
 #version 450
-// chunk vertex — mirrors Shaders.swift chunk_vs (PORTING 06 ABI: 28B stream)
-// minus shadows/ultra (later slices). Push constants only: 128 bytes exactly.
+// chunk vertex — mirrors Shaders.swift chunk_vs (PORTING 06 ABI: 28B stream).
+// Push constants are the full 128 bytes, so the sun's matrix rides a uniform.
 
 layout(location = 0) in vec3 inPos;
 layout(location = 1) in vec2 inUV;
@@ -28,7 +28,7 @@ layout(location = 7) out float vSkyAmt;
 // in push constants because the chunk block is already the full 128 bytes
 layout(set = 0, binding = 2) uniform Shadow {
     mat4 mat;
-    vec4 params;    // x = on, y = texel size
+    vec4 params;    // x = shadows on, y = texel size, z = ultra on
 } shadow;
 
 const float FACE_SHADE[6] = float[](0.55, 1.0, 0.8, 0.8, 0.62, 0.62);
