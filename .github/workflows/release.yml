@@ -27,8 +27,24 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: Build
-        run: swift build -c release --product Pebble
+      # both architectures, then one fat binary: Apple silicon runs the arm64
+      # slice, Intel Macs the x86_64 one. An arm64-only build simply will not
+      # launch on an Intel Mac — Rosetta translates x86 to arm, not the other
+      # way. Built separately and lipo'd rather than with --arch twice, which
+      # needs a full Xcode install.
+      - name: Build (Apple silicon)
+        run: swift build -c release --arch arm64 --product Pebble
+      - name: Build (Intel)
+        run: swift build -c release --arch x86_64 --product Pebble
+      - name: Combine into a universal binary
+        run: |
+          set -euo pipefail
+          mkdir -p .build/universal
+          lipo -create \
+            .build/arm64-apple-macosx/release/Pebble \
+            .build/x86_64-apple-macosx/release/Pebble \
+            -output .build/universal/Pebble
+          lipo -archs .build/universal/Pebble
       - name: Assemble Pebble.app
         run: |
           set -euo pipefail
@@ -40,7 +56,7 @@ jobs:
           cp packaging/title-bg.png "$APP/Contents/Resources/"
           cp packaging/*.zip        "$APP/Contents/Resources/" || true
           cp packaging/FAITHFUL-LICENSE.txt "$APP/Contents/Resources/" || true
-          cp .build/release/Pebble  "$APP/Contents/MacOS/Pebble"
+          cp .build/universal/Pebble "$APP/Contents/MacOS/Pebble"
           # ad-hoc: enough to run, not enough for Gatekeeper. See the README.
           codesign --force --sign - "$APP"
           cp packaging/OPENING-ON-ANOTHER-MAC.txt dist/
@@ -106,12 +122,13 @@ jobs:
             ## Download
 
             ### ⬇ **[Windows — download Pebble](https://github.com/${{ github.repository }}/releases/latest/download/Pebble-Windows.zip)**
-            ### ⬇ **[macOS (Apple silicon) — download Pebble](https://github.com/${{ github.repository }}/releases/latest/download/Pebble-macOS.zip)**
+            ### ⬇ **[macOS — download Pebble](https://github.com/${{ github.repository }}/releases/latest/download/Pebble-macOS.zip)**
 
             Those links always give you the newest version, so they keep working.
 
             **Windows:** unzip anywhere → run `Pebble.exe`. Nothing to install.
             **macOS:** unzip → drag **Pebble** into your Applications folder.
+            Apple silicon and Intel Macs both work; macOS 14 Sonoma or newer.
 
             ---
 

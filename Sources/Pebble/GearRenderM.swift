@@ -92,10 +92,8 @@ extension EntityRendererM {
                         viewProj: simd_float4x4, camPos: SIMD3<Double>, player: Player, p: EntityPose,
                         time: Double, dayLight: Double, fog: (color: SIMD3<Float>, start: Float, end: Float),
                         gamma: Double, ambient: Double) {
-        // body pose is in partMats right now — capture the arms before armor re-poses
-        let armR = partMats[2]
-        let armL = partMats[3]
-
+        // the arms the held items ride come from partMats, which still holds
+        // this player's body pose — pebPlayerGear takes the whole rig below
         var base = matrix_identity_float4x4
         base = mTranslate(base, Float(p.x - camPos.x), Float(p.y - camPos.y), Float(p.z - camPos.z))
         base = mRotateY(base, Float(.pi - p.yaw))

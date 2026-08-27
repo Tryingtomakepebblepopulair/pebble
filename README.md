@@ -25,8 +25,9 @@ Pebble is an original fan re-creation inspired by Minecraft: Java Edition 1.20. 
 
 ### ⬇ **[Windows — download Pebble](https://github.com/Tryingtomakepebblepopulair/pebble/releases/latest/download/Pebble-Windows.zip)** · ⬇ **[macOS — download Pebble](https://github.com/Tryingtomakepebblepopulair/pebble/releases/latest/download/Pebble-macOS.zip)**
 
-Both links always serve the newest version. Windows 10/11 (64-bit) and macOS
-on Apple silicon.
+Both links always serve the newest version. Windows 10/11 (64-bit), and
+macOS 14 Sonoma or newer — the Mac build is universal, so Apple silicon and
+Intel Macs both run it.
 
 | | |
 |---|---|
@@ -42,7 +43,7 @@ Or browse [all releases](../../releases/latest).
 
 Every zip ships a short text file with the same instructions. Prefer to build it yourself? One command: see [Install](#install--run).
 
-> **Pebble 1.2.2 is a beta.** The engine is pinned by 601 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
+> **Pebble 1.2.3 is a beta.** The engine is pinned by 601 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
 
 ## Sharing a build
 
@@ -122,7 +123,7 @@ still builds the zip — it just warns that the result is not notarized.
 
 ## Install
 
-Requirements: **macOS 14+** and the Xcode command-line tools (`xcode-select --install`). Apple silicon recommended.
+Requirements: **macOS 14+** and the Xcode command-line tools (`xcode-select --install`). Builds and runs on both Apple silicon and Intel.
 
 ```bash
 git clone https://github.com/thebriangao/pebble.git && cd pebble

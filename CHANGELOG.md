@@ -3,6 +3,17 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.2.3 — 2026-08-26 — Intel Macs
+
+- **The Mac download now runs on Intel Macs too.** It was built for Apple
+  silicon only, and an arm64 app does not merely run slowly on an Intel Mac —
+  it will not start at all, because Rosetta translates Intel code to Apple
+  silicon and not the other way round. The release is a universal binary now,
+  so both kinds of Mac run the same download. macOS 14 Sonoma or newer either
+  way; on Intel that means a 2018 or later model.
+- `pebble release` builds the universal binary too. A plain `pebble install`
+  still builds only for your own machine, which is quicker.
+
 ## 1.2.2 — 2026-08-26 — Windows looks like the Mac
 
 A hunt for anything that still rendered differently on the two platforms. A

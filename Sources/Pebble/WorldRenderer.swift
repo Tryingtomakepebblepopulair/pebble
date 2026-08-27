@@ -1232,7 +1232,6 @@ final class WorldRenderer {
             let iz = ent.prevZ + (ent.z - ent.prevZ) * partial
             let yaw = ent.prevYaw + wrapAngleD(ent.yaw - ent.prevYaw) * partial
             let bx = ifloorD(ent.x), by = ifloorD(ent.y + ent.height * 0.5), bz = ifloorD(ent.z)
-            let deathFlip = (liv?.deathTime ?? 0) > 0 ? min(1.0, Double(liv!.deathTime) / 20) : 0
             // the pose itself is shared with the Vulkan client
             let pose = pebEntityPose(w, ent, partial: partial)
 

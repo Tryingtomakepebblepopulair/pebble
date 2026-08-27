@@ -125,6 +125,23 @@ build() {
     fi
 }
 
+# A release has to run on Intel Macs too, and an arm64-only binary will not
+# even launch there — Rosetta goes x86 to arm, not the reverse. Build both
+# slices and lipo them; a normal `pebble install` stays native and fast.
+build_universal() {
+    say "Building the Intel slice for a universal app…"
+    (cd "$REPO" && "$PEBBLE_SWIFT" build -c release --arch arm64 --product Pebble)
+    (cd "$REPO" && "$PEBBLE_SWIFT" build -c release --arch x86_64 --product Pebble)
+    mkdir -p "$REPO/.build/universal"
+    lipo -create \
+        "$REPO/.build/arm64-apple-macosx/release/Pebble" \
+        "$REPO/.build/x86_64-apple-macosx/release/Pebble" \
+        -output "$REPO/.build/universal/Pebble" \
+        || die "lipo failed — could not build a universal binary"
+    say "Universal: $(lipo -archs "$REPO/.build/universal/Pebble")"
+    UNIVERSAL=1
+}
+
 bundle() {
     say "Assembling $APP_NAME.app…"
     local stage="$REPO/dist/$APP_NAME.app"
@@ -138,7 +155,11 @@ bundle() {
     cp "$REPO/packaging/"*.zip          "$stage/Contents/Resources/" 2>/dev/null || true
     # the Faithful license must travel with the pack (their requirement #6)
     cp "$REPO/packaging/FAITHFUL-LICENSE.txt" "$stage/Contents/Resources/" 2>/dev/null || true
-    cp "$REPO/.build/release/Pebble"    "$stage/Contents/MacOS/Pebble"
+    if [ "${UNIVERSAL:-0}" = "1" ] && [ -f "$REPO/.build/universal/Pebble" ]; then
+        cp "$REPO/.build/universal/Pebble" "$stage/Contents/MacOS/Pebble"
+    else
+        cp "$REPO/.build/release/Pebble"   "$stage/Contents/MacOS/Pebble"
+    fi
     sign_app "$stage"
 }
 
@@ -224,6 +245,7 @@ cmd_fix() {
 cmd_release() {
     need_swift
     build
+    build_universal
     bundle
     local out="$REPO/dist/$APP_NAME-macOS.zip"
     if [ -n "${PEBBLE_NOTARY_PROFILE:-}" ]; then
