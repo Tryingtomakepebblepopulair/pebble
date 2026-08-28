@@ -24,11 +24,26 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 public final class SaveDB {
     private var db: OpaquePointer?
 
+    /// nil when the database on disk opened normally. Otherwise: why it
+    /// didn't, and a warning that this session is not being saved anywhere.
+    public private(set) var openError: String?
+
     public init() {
         let url = vcSupportDir().appendingPathComponent("pebble.db")
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK else {
-            fatalError("pebble.db could not be opened: \(String(cString: sqlite3_errmsg(db)))")
+        if sqlite3_open_v2(url.path, &db, flags, nil) != SQLITE_OK {
+            // A save file that won't open used to end the process on the spot.
+            // On Windows that means the window disappears before it is ever
+            // drawn, and the reason — a read-only folder, a file another
+            // Pebble still has open — reaches nobody. Fall back to a private
+            // in-memory database instead: the game runs, nothing is written,
+            // and `openError` gives the shell something true to say.
+            openError = "\(url.path): \(String(cString: sqlite3_errmsg(db)))"
+            sqlite3_close(db)
+            db = nil
+            guard sqlite3_open_v2(":memory:", &db, flags, nil) == SQLITE_OK else {
+                fatalError("no save database at all: \(openError ?? "unknown")")
+            }
         }
         exec("PRAGMA journal_mode=WAL")
         exec("PRAGMA synchronous=NORMAL")

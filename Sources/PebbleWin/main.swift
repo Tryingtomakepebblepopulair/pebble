@@ -17,15 +17,6 @@ import PebbleCoreBase
 import CPebbleVulkan
 import CPebbleAudio
 
-let logFile = fopen("pebble-log.txt", "w")
-func plog(_ s: String) {
-    print(s)
-    if let logFile {
-        fputs(s + "\r\n", logFile)
-        fflush(logFile)
-    }
-}
-
 func alert(_ text: String) {
     plog("FATAL: \(text)")
     "Pebble".withCString(encodedAs: UTF16.self) { title in
@@ -37,7 +28,34 @@ func alert(_ text: String) {
 
 func nowMs() -> Double { monotonicNow() * 1000 }
 
+// ---- startup, in this order ----------------------------------------------------
+// The data root decides where everything else lives, so it is settled first.
+// The claim on it comes before the log, because a second Pebble must not
+// rotate away the log of the one already running. Then the log opens, and the
+// crash handler goes in before anything can crash.
+let dataRoot = chooseDataRoot()
+if getenv("PEBBLE_DATA_DIR") == nil { vcOverrideDataDir(dataRoot.path) }
+
+if !claimDataRoot(dataRoot.path) {
+    focusRunningPebble()
+    notice("""
+        Pebble is already running.
+
+        Its window should be in front of you now. If it is frozen, close it \
+        with Task Manager (Ctrl+Shift+Esc) before starting a new one.
+
+        Two copies sharing one set of worlds overwrite each other's saves, \
+        which is why this one is stopping here.
+        """)
+    exit(0)
+}
+
+openLog(dataRoot: dataRoot.path)
+installCrashHandler()
+
 plog("Pebble \(PEBBLE_VERSION) — Windows client (Vulkan)")
+plog("exe folder: \(exeDir())")
+plog("data root:  \(dataRoot.path)  (\(dataRoot.why))")
 
 // ---- args ---------------------------------------------------------------------
 var joinTarget: (host: String, port: UInt16)? = nil
@@ -58,12 +76,6 @@ do {
         }
         i += 1
     }
-}
-
-// worlds live beside the exe unless the caller pinned a data root
-if getenv("PEBBLE_DATA_DIR") == nil {
-    let root = FileManager.default.currentDirectoryPath + "\\PebbleData"
-    vcOverrideDataDir(root)
 }
 
 // ---- globals the window procedure reaches --------------------------------------
@@ -270,6 +282,19 @@ plog("vulkan ready — GPU: \(String(cString: pb_vk_device_name()))")
 // ---- the game + the real UI stack -------------------------------------------------
 let game = GameCore()
 gGame = game
+if let why = game.db.openError {
+    plog("SAVES UNAVAILABLE: \(why)")
+    notice("""
+        Pebble can't open its save file, so nothing you build this session \
+        will be kept:
+
+        \(why)
+
+        This is almost always the folder: move the whole Pebble folder out of \
+        Program Files (or out of the zip) — the Desktop is fine — and start it \
+        again.
+        """)
+}
 let ui = UIManager(cv: UICanvas())
 gUI = ui
 let hud = HUD()
@@ -335,7 +360,7 @@ platformLoadSkinBlob = { loadSkinBlob() }
 // terrain: the Faithful pack when shipped, the procedural tiles otherwise
 var terrainSlices: [[UInt8]]
 var terrainRes: Int
-let packPath = FileManager.default.currentDirectoryPath + "\\assets\\Faithful 32x - 1.20.1.zip"
+let packPath = exeDir() + "\\assets\\Faithful 32x - 1.20.1.zip"
 let packZip = FileManager.default.contents(atPath: packPath)
 if let zipData = packZip, let pack = buildPackTerrainAtlas(zip: zipData) {
     terrainSlices = pack.slices
@@ -445,7 +470,7 @@ resizeUI()
 
 // title art (the same PNGs the Mac bundles) from assets\ beside the exe
 func loadImageAsset(_ name: String) -> PebImage? {
-    let path = FileManager.default.currentDirectoryPath + "\\assets\\" + name
+    let path = exeDir() + "\\assets\\" + name
     guard let d = FileManager.default.contents(atPath: path) else { return nil }
     return pebDecodePNG(d)
 }
@@ -672,9 +697,10 @@ mainLoop: while true {
     frames += 1
     if now - lastReport >= 5 {
         let p = game.player
-        plog(String(format: "%.0f fps, pos %.1f %.1f %.1f, screen=%@",
+        plog(String(format: "%.0f fps, pos %.1f %.1f %.1f, %d sections, screen=%@",
                     Double(frames) / (now - lastReport),
                     p?.x ?? 0, p?.y ?? 0, p?.z ?? 0,
+                    Int(pb_vk_section_count()),
                     ui.current().map { String(describing: type(of: $0)) } ?? "none"))
         frames = 0
         lastReport = now

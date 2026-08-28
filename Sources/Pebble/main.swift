@@ -406,6 +406,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, MTKViewDelegate, NSWin
         installAppleUIServices()
         let t0 = CFAbsoluteTimeGetCurrent()
         game = GameCore()
+        if let why = game.db.openError {
+            print("[saves] UNAVAILABLE — nothing will be kept this session: \(why)")
+        }
         game.host = host
         host.app = self
         print(String(format: "registries: %.0fms (%d blocks, %d items, %d biomes)",

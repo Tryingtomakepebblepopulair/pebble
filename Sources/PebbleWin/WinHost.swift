@@ -39,16 +39,29 @@ final class WinHost: GameHost {
     }
 
     // ---- renderer ----------------------------------------------------------
+
+    /// a failed upload is a hole in the world; say so once and keep going
+    private var uploadFailureReported = false
+
     func uploadMesh(_ cx: Int, _ sy: Int, _ cz: Int, _ minY: Int, _ mesh: MeshOutput) {
         let id = sectionKey(cx, sy, cz)
         let ox = Double(cx * 16), oy = Double(minY + sy * 16), oz = Double(cz * 16)
         for (pass, layer) in [(Int32(0), mesh.opaque), (1, mesh.cutout), (2, mesh.translucent)] {
-            _ = layer.data.withUnsafeBufferPointer { vp in
+            let rc = layer.data.withUnsafeBufferPointer { vp in
                 layer.idx.withUnsafeBufferPointer { ip in
                     pb_vk_upload_section(id, pass, ox, oy, oz,
                                          vp.baseAddress, Int32(layer.count),
                                          ip.baseAddress, Int32(layer.idx.count))
                 }
+            }
+            // This return value used to be thrown away, which is why chunks
+            // that never arrived looked like a mystery rather than a message.
+            if rc != 0 && !uploadFailureReported {
+                uploadFailureReported = true
+                plog("CHUNK UPLOAD FAILED at \(cx),\(sy),\(cz) pass \(pass): "
+                    + String(cString: pb_vk_last_error()))
+                plog("  \(pb_vk_section_count()) sections live. Terrain will have holes; "
+                    + "a lower Render Distance in Options is the fix.")
             }
         }
         meshedByChunk[chunkKey(cx, cz), default: []].insert(sy)

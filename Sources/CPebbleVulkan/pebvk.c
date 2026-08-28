@@ -623,22 +623,46 @@ static int make_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
     bci.size = size;
     bci.usage = usage;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    VKTRY(vkCreateBuffer(g_device, &bci, NULL, buf), "create buffer");
+    *buf = VK_NULL_HANDLE;
+    *mem = VK_NULL_HANDLE;
+    // Every exit below leaves *buf and *mem exactly as it found them. They
+    // used to be left half-built on the failure path: the caller saw -1 and
+    // dropped the pointers, so the buffer that HAD been created was never
+    // destroyed. Under the memory pressure that made the allocation fail in
+    // the first place, that leak fed straight back into more failures.
+#define MB_BAIL(what) do { \
+        snprintf(g_err, sizeof g_err, "%s", what); \
+        if (*mem) vkFreeMemory(g_device, *mem, NULL); \
+        if (*buf) vkDestroyBuffer(g_device, *buf, NULL); \
+        *buf = VK_NULL_HANDLE; *mem = VK_NULL_HANDLE; \
+        return -1; \
+    } while (0)
+    if (vkCreateBuffer(g_device, &bci, NULL, buf) != VK_SUCCESS) MB_BAIL("create buffer");
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(g_device, *buf, &req);
     VkMemoryAllocateInfo mai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     mai.allocationSize = req.size;
     mai.memoryTypeIndex = find_mem_type(req.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (mai.memoryTypeIndex == UINT32_MAX) FAIL("no host-visible memory type");
-    VKTRY(vkAllocateMemory(g_device, &mai, NULL, mem), "allocate buffer memory");
-    VKTRY(vkBindBufferMemory(g_device, *buf, *mem, 0), "bind buffer memory");
+    if (mai.memoryTypeIndex == UINT32_MAX) MB_BAIL("no host-visible memory type");
+    VkResult allocRes = vkAllocateMemory(g_device, &mai, NULL, mem);
+    if (allocRes != VK_SUCCESS) {
+        // VK_ERROR_TOO_MANY_OBJECTS is its own story: drivers cap how many
+        // allocations may be live at once (4096 is a common figure) and a
+        // chunk section takes two. Say which wall we hit, because "out of
+        // memory" sends whoever reads the log looking for the wrong thing.
+        MB_BAIL(allocRes == VK_ERROR_TOO_MANY_OBJECTS
+                ? "out of GPU memory allocations (driver limit reached)"
+                : "allocate buffer memory");
+    }
+    if (vkBindBufferMemory(g_device, *buf, *mem, 0) != VK_SUCCESS) MB_BAIL("bind buffer memory");
     if (data) {
         void* dst = NULL;
-        VKTRY(vkMapMemory(g_device, *mem, 0, size, 0, &dst), "map buffer");
+        if (vkMapMemory(g_device, *mem, 0, size, 0, &dst) != VK_SUCCESS) MB_BAIL("map buffer");
         memcpy(dst, data, (size_t)size);
         vkUnmapMemory(g_device, *mem);
     }
+#undef MB_BAIL
     return 0;
 }
 
@@ -1008,11 +1032,13 @@ int pb_vk_create(void* hwnd, void* hinstance, int width, int height) {
                     g_queueFamily = q;
                     VkPhysicalDeviceProperties props;
                     vkGetPhysicalDeviceProperties(g_phys, &props);
-                    snprintf(g_gpu, sizeof g_gpu, "%s (maxTex %u, maxLayers %u, push %u)",
+                    snprintf(g_gpu, sizeof g_gpu,
+                             "%s (maxTex %u, maxLayers %u, push %u, maxAllocs %u)",
                              props.deviceName,
                              props.limits.maxImageDimension2D,
                              props.limits.maxImageArrayLayers,
-                             props.limits.maxPushConstantsSize);
+                             props.limits.maxPushConstantsSize,
+                             props.limits.maxMemoryAllocationCount);
                     // the part-matrix ring is indexed with dynamic offsets,
                     // which must be multiples of this
                     VkDeviceSize a = props.limits.minUniformBufferOffsetAlignment;
@@ -2413,10 +2439,14 @@ int pb_vk_upload_section(unsigned long long id, int pass,
         if (g_sections[i].pass == -1) { s = &g_sections[i]; break; }
     }
     if (!s) FAIL("out of section slots (%d)", MAX_SECTIONS);
+    // A slot is only claimed once BOTH buffers exist. Bailing out halfway used
+    // to leave the vertex buffer in a slot still marked free, so the next
+    // upload overwrote the handle and leaked it — one leak per failure, for
+    // as long as the player kept walking.
     if (make_buffer((VkDeviceSize)vertCount * 28, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                    &s->vbuf, &s->vmem, verts) != 0) return -1;
+                    &s->vbuf, &s->vmem, verts) != 0) { free_section(s); return -1; }
     if (make_buffer((VkDeviceSize)indexCount * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                    &s->ibuf, &s->imem, indices) != 0) return -1;
+                    &s->ibuf, &s->imem, indices) != 0) { free_section(s); return -1; }
     s->id = id;
     s->pass = pass;
     s->ox = ox; s->oy = oy; s->oz = oz;
@@ -2427,6 +2457,12 @@ int pb_vk_upload_section(unsigned long long id, int pass,
 void pb_vk_remove_section(unsigned long long id, int pass) {
     PbSection* s = find_section(id, pass);
     if (s) free_section(s);
+}
+
+int pb_vk_section_count(void) {
+    int n = 0;
+    for (int i = 0; i < MAX_SECTIONS; i++) if (g_sections[i].pass != -1) n++;
+    return n;
 }
 
 void pb_vk_clear_sections(void) {
@@ -3795,6 +3831,7 @@ int pb_vk_upload_section(unsigned long long id, int pass,
 }
 void pb_vk_remove_section(unsigned long long id, int pass) { (void)id; (void)pass; }
 void pb_vk_clear_sections(void) {}
+int pb_vk_section_count(void) { return 0; }
 int pb_vk_upload_entity_geom(int geomId, const void* verts, int vertCount,
                              const unsigned char* rgba, int texW, int texH) {
     (void)geomId; (void)verts; (void)vertCount; (void)rgba; (void)texW; (void)texH; return -1;

@@ -172,6 +172,11 @@ int pb_vk_upload_gui_sheet(const unsigned char* rgba, int w, int h);
 void pb_vk_ui_set_segments(const int* segs, int pairCount);
 
 // human-readable reason for the last failure (static buffer)
+// live section slots — two GPU allocations each, against the driver's
+// maxMemoryAllocationCount (reported by pb_vk_device_name). When terrain
+// starts going missing, this is the number that says why.
+int pb_vk_section_count(void);
+
 const char* pb_vk_last_error(void);
 
 // GPU name once created ("" before) — shown in logs/reports
