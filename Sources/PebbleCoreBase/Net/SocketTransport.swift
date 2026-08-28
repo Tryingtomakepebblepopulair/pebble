@@ -404,3 +404,57 @@ public final class SocketListener: NetListener {
         if s != PEB_BAD_SOCKET { pebCloseSocket(s) }
     }
 }
+
+// ---- this machine's address ---------------------------------------------------
+
+/// The LAN IPv4 a guest has to dial to reach us — what a LAN code is made of.
+///
+/// There is no portable "list my interfaces" call (getifaddrs is POSIX,
+/// GetAdaptersAddresses is Win32), so we use the one trick both stacks agree
+/// on: point a UDP socket at a routable address and ask the kernel which
+/// local address it would use. UDP connect() sends nothing — no packet ever
+/// leaves the machine, and the destination need not exist. 192.0.2.1 is
+/// TEST-NET-1 (RFC 5737): reserved for documentation, never a real host.
+///
+/// Returns nil on a machine with no route at all (no Wi-Fi, no cable), which
+/// is also exactly when there is no LAN to host on.
+public func localIPv4() -> String? {
+    guard wsaReady else { return nil }
+    var hints = addrinfo()
+    hints.ai_family = AF_INET
+    hints.ai_socktype = {
+        #if os(Windows)
+        Int32(SOCK_DGRAM)
+        #else
+        SOCK_DGRAM
+        #endif
+    }()
+    var res: UnsafeMutablePointer<addrinfo>?
+    guard getaddrinfo("192.0.2.1", "9", &hints, &res) == 0, let ai = res else { return nil }
+    defer { freeaddrinfo(ai) }
+
+    let s = socket(ai.pointee.ai_family, ai.pointee.ai_socktype, ai.pointee.ai_protocol)
+    guard s != PEB_BAD_SOCKET else { return nil }
+    defer { pebCloseSocket(s) }
+    #if os(Windows)
+    guard connect(s, ai.pointee.ai_addr, Int32(ai.pointee.ai_addrlen)) == 0 else { return nil }
+    var len = Int32(MemoryLayout<sockaddr_in>.size)
+    #else
+    guard connect(s, ai.pointee.ai_addr, socklen_t(ai.pointee.ai_addrlen)) == 0 else { return nil }
+    var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+    #endif
+
+    var local = sockaddr_in()
+    let ok = withUnsafeMutablePointer(to: &local) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(s, $0, &len) == 0 }
+    }
+    guard ok else { return nil }
+    // sin_addr sits at offset 4 in sockaddr_in on every BSD-sockets ABI,
+    // Winsock included — read the four bytes instead of the in_addr union,
+    // whose Swift spelling differs between platforms
+    let quad = withUnsafeBytes(of: local) { raw -> [UInt8] in
+        (4..<8).map { raw.load(fromByteOffset: $0, as: UInt8.self) }
+    }
+    guard quad != [0, 0, 0, 0] else { return nil }
+    return "\(quad[0]).\(quad[1]).\(quad[2]).\(quad[3])"
+}

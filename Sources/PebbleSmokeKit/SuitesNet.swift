@@ -139,5 +139,89 @@ public func smokeSocialSuite() {
         }
         check("friend code rejects garbage", FriendCode.decode("PEB1!!!not-base64!!!") == nil
             && FriendCode.decode("hello") == nil && FriendCode.decode("") == nil)
+
+        // LAN codes: the host's ADDRESS in ten characters, so a guest on any
+        // platform can join without discovery, a friend list, or an IP to type
+        var roundTripped = true
+        for (host, port) in [("192.168.1.20", UInt16(25585)), ("10.0.0.2", 1),
+                             ("172.16.254.1", 65535), ("255.255.255.255", 25585),
+                             ("1.2.3.4", 25585)] {
+            guard let code = JoinCode.encode(host: host, port: port),
+                  let back = JoinCode.decode(code),
+                  back.host == host, back.port == port else {
+                roundTripped = false
+                check("LAN code round-trip \(host):\(port)", false)
+                continue
+            }
+        }
+        check("LAN code round-trips every address", roundTripped)
+
+        let sample = JoinCode.encode(host: "192.168.1.20", port: 25585) ?? ""
+        check("LAN code is twelve characters in three groups", sample.count == 14
+              && sample.split(separator: "-").allSatisfy { $0.count == 4 },
+              "got \"\(sample)\"")
+        check("LAN code avoids the letters people mistype",
+              !sample.contains(where: { "ILOU".contains($0) }), "got \"\(sample)\"")
+
+        // typed by hand, badly: case, spaces, the dash dropped, and the
+        // characters Crockford base32 leaves out folded back to digits
+        let messy = sample.replacingOccurrences(of: "-", with: " ").lowercased()
+        check("LAN code survives sloppy typing",
+              JoinCode.decode(messy)?.host == "192.168.1.20")
+        if let folded = JoinCode.encode(host: "10.0.0.1", port: 25585) {
+            let confused = folded.replacingOccurrences(of: "0", with: "O")
+                                 .replacingOccurrences(of: "1", with: "l")
+            check("LAN code folds O to zero and l to one",
+                  JoinCode.decode(confused)?.host == "10.0.0.1")
+        } else {
+            check("LAN code folds O to zero and l to one", false)
+        }
+
+        // the two check bits: one wrong character must not silently connect
+        // you to a stranger's machine
+        var caught = 0
+        var tried = 0
+        let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+        for i in sample.indices where sample[i] != "-" {
+            for sub in alphabet where sub != sample[i] {
+                var typo = sample
+                typo.replaceSubrange(i...i, with: String(sub))
+                tried += 1
+                if JoinCode.decode(typo) == nil { caught += 1 }
+            }
+        }
+        check("one-character typos are all rejected", caught == tried,
+              "caught \(caught) of \(tried)")
+
+        check("LAN code rejects what isn't an address",
+              JoinCode.encode(host: "pebble.local", port: 25585) == nil
+              && JoinCode.encode(host: "", port: 25585) == nil
+              && JoinCode.encode(host: "192.168.1.999", port: 25585) == nil)
+        check("LAN code rejects nonsense", JoinCode.decode("") == nil
+            && JoinCode.decode("hello") == nil && JoinCode.decode(sample + "X") == nil)
+
+        // whatever the machine running this has, it must be a dotted quad or
+        // an honest nil — never a half-parsed address a guest would dial
+        if let ip = localIPv4() {
+            let quads = ip.split(separator: ".")
+            check("local IPv4 is a dotted quad", quads.count == 4
+                && quads.allSatisfy { UInt16($0).map { $0 <= 255 } == true }, "got \(ip)")
+            check("local IPv4 makes a LAN code", JoinCode.encode(host: ip, port: 25585) != nil)
+        } else {
+            check("local IPv4 absent is survivable", true)   // no route: nothing to host on
+            check("local IPv4 makes a LAN code", true)
+        }
+
+        // the screen itself: Join By Code has to be reachable with an empty
+        // friends list and no discovery at all, because that is exactly the
+        // state a fresh Windows install is in
+        let game = GameCore()
+        let ui = UIManager(cv: UICanvas())
+        let mp = MultiplayerScreen()
+        mp.initScreen(ui, game)
+        check("multiplayer opens on the LAN tab with a code field",
+              mp.fields.contains { $0 === mp.lanCodeField })
+        check("Join By Code is offered without discovery",
+              mp.buttons.contains { $0.label == "Join By Code" && $0.enabled })
     }
 }

@@ -2222,9 +2222,29 @@ public final class GameCore {
             return false
         }
         netHost = session
-        host?.pushChat("§eLAN world open — friends on this network can join from their title screen")
+        host?.pushChat("§eLAN world open. Press §fEsc§e for your LAN code - anyone on this")
+        host?.pushChat("§enetwork can join with it, Mac or Windows, friends or not.")
         host?.showActionBar("§aLAN world open!", 100)
         return true
+    }
+
+    /// this machine's LAN address, looked up at most twice a minute: the
+    /// syscall is cheap but the pause menu asks every frame, and the answer
+    /// only changes when you move between networks
+    private var cachedLocalIP: (ip: String?, at: Double) = (nil, -1e9)
+
+    /// The code a guest types to reach this host — our address in ten
+    /// characters (see JoinCode). Computed, not stored: the Apple listener
+    /// learns its port asynchronously, so the answer is nil for the first few
+    /// frames after "Open to LAN" and then simply appears.
+    ///
+    /// Nil also means nothing is hosted, or this machine has no network route.
+    public var lanCode: String? {
+        guard let p = netHost?.port, p != 0 else { return nil }
+        let now = monotonicNow()
+        if now - cachedLocalIP.at > 30 { cachedLocalIP = (localIPv4(), now) }
+        guard let ip = cachedLocalIP.ip else { return nil }
+        return JoinCode.encode(host: ip, port: p)
     }
 
     /// join a discovered LAN game (called by the browser screen)

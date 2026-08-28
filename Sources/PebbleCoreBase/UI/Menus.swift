@@ -300,6 +300,13 @@ public final class LoadingScreen: Screen {
 
 // =============================================================================
 public final class PauseScreen: Screen {
+    /// set by the Copy LAN Code button, so the hint line can confirm it
+    private var copied = false
+    /// the code goes ON its button: the menu has no room for a line of text
+    /// between the buttons, and the listener may not know its port yet when
+    /// the menu is built, so the label is refreshed every frame
+    private weak var lanCodeButton: Button?
+
     public override init() {
         super.init()
         pausesGame = true
@@ -335,6 +342,20 @@ public final class PauseScreen: Screen {
         }
         buttons.append(lanB)
         y += 24
+        // hosting: the LAN code is the whole join flow for everyone who isn't
+        // on a Mac looking at Bonjour — one button, one code, any platform
+        if game.netHost != nil {
+            let copyB = Button(cx - 100, y, 200, 20, "LAN code: opening...", {})
+            copyB.enabled = false
+            copyB.onClick = { [weak self, weak game] in
+                guard let game, let code = game.lanCode else { return }
+                platformSetClipboard(code)
+                self?.copied = true
+            }
+            buttons.append(copyB)
+            lanCodeButton = copyB
+            y += 24
+        }
         let quitLabel = game.netGuest != nil ? "Leave Game" : "Save & Quit to Title"
         buttons.append(Button(cx - 100, y, 200, 20, quitLabel, { [weak game] in
             guard let game else { return }
@@ -348,6 +369,21 @@ public final class PauseScreen: Screen {
         if game.netHost != nil || game.netGuest != nil {
             ui.cv.drawTextCentered("§7The world keeps running while this menu is open", ui.width / 2,
                                    (ui.height / 2).rounded(.down) - 58, 1)
+        }
+        // the code is computed live: the listener may still be claiming its
+        // port for a frame or two after "Open to LAN"
+        if let b = lanCodeButton {
+            if let code = game.lanCode {
+                b.label = "Copy code: §a\(code)"
+                b.enabled = true
+            } else {
+                b.label = "LAN code: opening..."
+                b.enabled = false
+            }
+            ui.cv.drawTextCentered(copied
+                ? "§aCopied! They pick Multiplayer, then Join By Code."
+                : "§7Read that code out to anyone - Mac or Windows, friend or not.",
+                ui.width / 2, (ui.height / 2).rounded(.down) + 98, 1)
         }
         ui.drawButtons(self)
     }

@@ -1,5 +1,6 @@
 // Multiplayer — one screen, three tabs:
-//   LAN Games — Bonjour-discovered sessions on this network, click to join
+//   LAN Games — join by LAN code (every platform), plus Bonjour-discovered
+//               sessions on this network where the OS offers discovery
 //   Friends   — your friends list (online = joinable, via TXT pid match)
 //               plus Recent Players you can promote to friends
 //   Servers   — saved addresses for standalone pebserver worlds (SMP);
@@ -13,6 +14,7 @@ public final class MultiplayerScreen: Screen {
     public let addressField = TextField(0, 0, 200, 16, "address, like 192.168.1.20:25585")
     public let serverNameField = TextField(0, 0, 200, 16, "name this server")
     public let codeField = TextField(0, 0, 200, 16, "paste a friend code (PEB1…)")
+    public let lanCodeField = TextField(0, 0, 200, 16, "code, like R2M0-2533-Y6MV")
 
     private var tab = "lan"
     private let browser = makeLanDiscovery()
@@ -77,6 +79,29 @@ public final class MultiplayerScreen: Screen {
 
         switch tab {
         case "lan":
+            // Join By Code first: Bonjour discovery only exists on the Mac, so
+            // this is the join path that works from every platform — and it
+            // needs no friend list, no accounts, nothing swapped in advance.
+            lanCodeField.x = cx - 100
+            lanCodeField.y = y + 18         // clear air under the status line
+            lanCodeField.maxLength = 20
+            fields.append(lanCodeField)
+            let byCodeB = Button(cx - 100, y + 44, 200, 20, "Join By Code", { [weak self] in
+                guard let self else { return }
+                let typed = self.lanCodeField.text
+                guard let addr = JoinCode.decode(typed) else {
+                    self.status = typed.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? "Type the LAN code the host reads out to you."
+                        : "That code doesn't look right — check it letter by letter."
+                    self.statusColor = "#ff7070"
+                    return
+                }
+                self.joinAddress(addr.host, addr.port, shownName: "the LAN game")
+            })
+            byCodeB.enabled = joining == nil
+            buttons.append(byCodeB)
+            y += 76
+
             if found.isEmpty {
                 status = joining == nil ? "Searching for games on this network…" : status
             } else if joining == nil {
@@ -280,6 +305,9 @@ public final class MultiplayerScreen: Screen {
         ui.drawDirtBg()
         ui.cv.drawTextCentered("Multiplayer", ui.width / 2, 6, 1)
         ui.cv.drawText("Your Name", nameField.x, nameField.y - 10, 1, "#a0a0a0")
+        if tab == "lan" {
+            ui.cv.drawText("LAN Code", lanCodeField.x, lanCodeField.y - 10, 1, "#a0a0a0")
+        }
         if tab == "servers" && fields.count > 1 {
             ui.cv.drawText("Server Address", addressField.x, addressField.y - 10, 1, "#a0a0a0")
             ui.cv.drawText("Server Name (optional)", serverNameField.x, serverNameField.y - 10, 1, "#a0a0a0")
@@ -296,8 +324,10 @@ public final class MultiplayerScreen: Screen {
             ui.cv.drawTextCentered(status, ui.width / 2, 82, 1, statusColor)
         }
         if tab == "lan" && found.isEmpty && joining == nil {
-            ui.cv.drawTextCentered("§7Ask the host to press Esc → \"Open to LAN\" in their world,", ui.width / 2, 120, 1)
-            ui.cv.drawTextCentered("§7or start a server with:  pebble serve", ui.width / 2, 134, 1)
+            ui.cv.drawTextCentered("§7The host presses Esc, picks \"Open to LAN\", and reads you",
+                                   ui.width / 2, ui.height - 62, 1)
+            ui.cv.drawTextCentered("§7the code. Mac to Windows, Windows to Mac, friends or not.",
+                                   ui.width / 2, ui.height - 50, 1)
         }
         ui.drawButtons(self)
     }
