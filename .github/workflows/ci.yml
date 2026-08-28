@@ -1,6 +1,6 @@
 # CI — PORTING modules 13/05/12: every push builds the full package on macOS
-# and runs the 582-check golden suite; Windows builds the portable core +
-# pebserver and runs the 547-check subset (pebsmokecore) against the SAME
+# and runs the 613-check golden suite; Windows builds the portable core +
+# pebserver and runs the 578-check subset (pebsmokecore) against the SAME
 # goldens — bit-identical worldgen AND a dedicated-server/guest e2e over
 # plain sockets, cross-platform. Both lanes use temp data roots.
 # PEBBLE_REGOLD is forbidden in CI: goldens are frozen.
@@ -82,7 +82,7 @@ jobs:
           Copy-Item packaging\logo.png stage\assets\
           Copy-Item "packaging\Faithful 32x - 1.20.1.zip" stage\assets\
           Copy-Item "packaging\Faithful 32x - 1.20.1 LICENSE.txt" stage\assets\ -ErrorAction SilentlyContinue
-          Set-Content -Path stage\LEES-MIJ.txt -Value "PEBBLE voor Windows (testbuild)`r`n`r`nSTARTEN: dubbelklik Pebble.exe — je krijgt HET ECHTE Pebble-titelscherm,`r`nprecies zoals op de Mac: Singleplayer, Multiplayer (direct connect met`r`nip:poort), Options, alles werkt.`r`n`r`nBESTURING: zoals altijd — WASD/spatie/shift/ctrl, E inventaris, T chat,`r`nEsc pauze, links slopen, rechts bouwen. Klik in het venster om te spelen.`r`n`r`nSKIN: leg een skin.png (64x64) in de map PebbleData — vrienden zien hem,`r`njij ziet die van hen.`r`n`r`nGELUID: werkt (gesynthetiseerd, geen bestanden).`r`n`r`nPROBLEEM? Stuur pebble-log.txt (naast Pebble.exe) + screenshot (Win+Shift+S)"
+          Set-Content -Path stage\LEES-MIJ.txt -Value "PEBBLE voor Windows (testbuild)`r`n`r`nUITPAKKEN EERST: sleep deze hele map uit de zip (je bureaublad is prima) en`r`nstart Pebble.exe daar. Draai hem NIET vanuit de zip zelf, en haal Pebble.exe`r`nniet los van de rest van de map. Je werelden komen in de map PebbleData die`r`nnaast Pebble.exe ontstaat.`r`n`r`nSTARTEN: dubbelklik Pebble.exe — je krijgt HET ECHTE Pebble-titelscherm,`r`nprecies zoals op de Mac: Singleplayer, Multiplayer, Options, alles werkt.`r`n`r`nSAMEN SPELEN MET EEN LAN-CODE: wie de wereld heeft, drukt in het spel op Esc`r`nen kiest 'Open to LAN'. Op de knop staat dan een code van twaalf tekens, zoals`r`n18A2-NBZ6-VCQ2. Die code lees je voor of stuur je door (WhatsApp, wat dan ook).`r`nDe ander kiest Multiplayer, dan 'Join By Code', typt hem in, en zit erin.`r`nWerkt van Mac naar Windows en van Windows naar Mac, ook als jullie geen`r`nvrienden in het spel zijn. Jullie moeten wel op hetzelfde wifi zitten.`r`n`r`nBESTURING: zoals altijd — WASD/spatie/shift/ctrl, E inventaris, T chat,`r`nEsc pauze, links slopen, rechts bouwen. Klik in het venster om te spelen.`r`n`r`nSKIN: leg een skin.png (64x64) in de map PebbleData — vrienden zien hem,`r`njij ziet die van hen.`r`n`r`nGELUID: werkt (gesynthetiseerd, geen bestanden).`r`n`r`nPEBBLE DRAAIT AL? Dan staat er nog een oude Pebble open, ook al zie je hem`r`nniet. Sluit die eerst (Ctrl+Shift+Esc, Taakbeheer). Twee keer Pebble op`r`ndezelfde werelden maakt je saves kapot, dus de tweede weigert te starten.`r`n`r`nPROBLEEM? Stuur pebble-log.txt EN pebble-log-prev.txt (allebei naast`r`nPebble.exe) + screenshot (Win+Shift+S). pebble-log-prev.txt is de vorige keer:`r`nals hij crasht en je start opnieuw, staat de crash daarin."
       - uses: actions/upload-artifact@v4
         with:
           name: pebble-windows-demo

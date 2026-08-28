@@ -10,9 +10,11 @@ Owner: **Xavi** — a young Dutch hobbyist. Explain things to him **simply and i
 
 ## State
 
-**2026-07-12 — the Windows client is a real, playable Pebble.** It boots the actual Pebble UI (title screen, options, multiplayer/direct-connect lobby), renders terrain with Faithful textures, draws mobs and other players, streams chunks, takes input, and joins Mac-hosted worlds over direct IP. Both CI lanes are green. Known gaps on Windows: no audio (PORTING 10), entities are in bind pose (no animator yet — that still lives Apple-side in `EntityRendererM`), no shadows/bloom/ultra, no first-person viewmodel.
+**2026-08-28 — 1.3.0: LAN codes, and a Windows that keeps its worlds.** Every Metal pass has a Vulkan counterpart, audio works, and joining is one code typed on either platform. The Windows client no longer resolves its paths against the working directory (which is how it kept "forgetting" worlds and losing the texture pack), refuses to run twice over one data root, keeps the previous run's log, and reports what an unhandled exception was instead of vanishing. **Still unverified on real Windows hardware:** the crash handler, the single-instance guard, and the AppData fallback have only ever been compiled, never run — CI cannot press Alt+F4.
 
-macOS is unchanged: same app, same saves, same green checks — 601 of them now.
+The earlier state note, for the record: 2026-07-12, the Windows client became a real, playable Pebble — the actual Pebble UI, Faithful terrain, mobs, chunk streaming, and joining Mac-hosted worlds over direct IP.
+
+macOS is unchanged: same app, same saves, same green checks — 613 of them now.
 
 ## Where things live
 
@@ -26,7 +28,7 @@ macOS is unchanged: same app, same saves, same green checks — 601 of them now.
 | `CPebbleAudio` | Audio sink behind a `pb_audio_*` C ABI: winmm's waveOut (plain C, no COM, no SDK). Pebble synthesizes every sound, so a platform only hands over finished stereo samples. | Windows (stubs elsewhere) |
 | `CSQLite` / `CCodecs` | Project-owned SQLite, lodepng + miniz — same engine/codecs on every platform. | all |
 | `PebbleSmokeKit` | The shared golden suites both smoke runners execute. | all |
-| `pebsmoke` / `pebsmokecore` | macOS full suite (601) / portable suite (566) — the one Windows CI runs. | macOS / all |
+| `pebsmoke` / `pebsmokecore` | macOS full suite (613) / portable suite (578) — the one Windows CI runs. | macOS / all |
 | `pebserver` | Headless SMP server: 20 TPS, no host player, direct IP everywhere, Bonjour on macOS. | all |
 
 ## Rules that must not break
@@ -45,8 +47,8 @@ macOS is unchanged: same app, same saves, same green checks — 601 of them now.
 ```
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
-swift run pebsmoke                # macOS: 601 checks (self-assigns a temp data root)
-swift run pebsmokecore            # portable: 566 checks, runs anywhere
+swift run pebsmoke                # macOS: 613 checks (self-assigns a temp data root)
+swift run pebsmokecore            # portable: 578 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server
 ```
@@ -76,7 +78,7 @@ Then read the PNG. Other hooks: `PEBBLE_BOT=1` (physics bot), `PEBBLE_PHOTOBOOTH
 
 ## Multiplayer in one paragraph
 
-Host-authoritative. The host runs the untouched simulation; every guest exists on the host as a puppet `Player` entity driven by ~20 Hz state messages, so mob AI, spawning, item magnets and combat need no special cases. Guest actions replay on the host through the normal Interact/Combat paths; resulting edits fan out as `setBlock` deltas via `WorldHooks.onBlockChanged`. Guests regenerate pristine terrain from the seed and fetch only *modified* chunks (the same VCK1 container the save DB uses), which is why joining is fast and why worldgen determinism is a hard requirement. Identity is a permanent UUID (`Settings.playerId`); servers key player data as `worldId#id:<pid>` so renames keep your stuff. Friend codes (`PEB1…`) are that identity in a shareable string — swapping codes over any chat app *is* the friend request, because Pebble has no central server.
+Host-authoritative. The host runs the untouched simulation; every guest exists on the host as a puppet `Player` entity driven by ~20 Hz state messages, so mob AI, spawning, item magnets and combat need no special cases. Guest actions replay on the host through the normal Interact/Combat paths; resulting edits fan out as `setBlock` deltas via `WorldHooks.onBlockChanged`. Guests regenerate pristine terrain from the seed and fetch only *modified* chunks (the same VCK1 container the save DB uses), which is why joining is fast and why worldgen determinism is a hard requirement. Identity is a permanent UUID (`Settings.playerId`); servers key player data as `worldId#id:<pid>` so renames keep your stuff. Friend codes (`PEB1…`) are that identity in a shareable string — swapping codes over any chat app *is* the friend request, because Pebble has no central server. **LAN codes** (`JoinCode.swift`) are the other half: the host's *address* in twelve Crockford-base32 characters, shown on the pause menu once a world is open to LAN and typed under Multiplayer → Join By Code. That is the only join path that exists on both platforms — Bonjour discovery lives in the Apple adapter, so a Windows client's LAN list is always empty — and it needs no friendship. `localIPv4()` finds our address by connecting a UDP socket to 192.0.2.1 and reading `getsockname`, because getifaddrs and GetAdaptersAddresses are each half the world.
 
 ## Gotchas already paid for
 
@@ -89,6 +91,8 @@ Host-authoritative. The host runs the untouched simulation; every guest exists o
 - **Worldgen spawns extra mobs**, and pigs wander: e2e checks must watch *all* candidates and chase-then-swing, or they flake.
 - **Test runs that crash leave `nettest-*` worlds in the real `pebble.db`** — that is why the hermetic data root exists; clean strays with `sqlite3` if you find them.
 - **`setenv` is POSIX-only**; use `_putenv_s` on Windows (`import CRT`). `Dispatch` may need an explicit import on Windows.
+- **Never resolve a Windows path against the working directory.** It is the exe's folder only when Explorer launches it; a shortcut, a terminal, or a crash dialog's restart button all give something else. `exeDir()` (GetModuleFileNameW) is the anchor for the data root, the assets and the log. This cost Pebble a bug report that read as "it forgot my worlds and changed its textures".
+- **The 5×7 font falls back to `?` for anything outside `GLYPHS`.** Check a new character is in the table before putting it in UI text — `—`, `…`, `●` and `✕` all silently became question marks for months.
 
 ## Session handoff
 

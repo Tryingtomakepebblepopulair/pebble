@@ -12,8 +12,8 @@ x86_64-w64-mingw32-gcc -c -o /tmp/a.o -I Sources/CPebbleAudio/include Sources/CP
 # shaders + their push-constant block sizes (mirror these with _Static_assert)
 glslangValidator -V --target-env vulkan1.0 -q -o /dev/null Sources/CPebbleVulkan/shaders/sky.vert
 # the goldens
-swift run -c release pebsmoke        # macOS, 601
-swift run -c release pebsmokecore    # portable — what Windows CI runs, 566
+swift run -c release pebsmoke        # macOS, 613
+swift run -c release pebsmokecore    # portable — what Windows CI runs, 578
 ```
 
 `Sources/PebbleWin/*.swift` sits behind `#if os(Windows)` and never type-checks
@@ -60,11 +60,50 @@ screen draws its art through UI image quads instead.
 - [x] entity animation (walk cycle, head turn, limb swing)
 - [x] gear on entities (armour, held items on mobs and players)
 
+## Startup, storage and crashes (1.3.0)
+
+The renderer was never the whole port. Three things outside it were making
+Windows feel like a different, less trustworthy game, and all three are fixed
+in `WinStart.swift`:
+
+- **Paths came off the working directory.** `PebbleData`, `assets\` and
+  `pebble-log.txt` were all `currentDirectoryPath + "\..."`. That equals the
+  exe's folder only when Explorer launches it; a shortcut, a terminal, a
+  crash dialog's restart button, or running from inside the zip all give
+  something else — and Pebble then made a second, empty data root and fell
+  back to procedural textures. `exeDir()` (GetModuleFileNameW) is the anchor
+  now, with `%LOCALAPPDATA%\Pebble` as the fallback when the exe's folder
+  cannot be written to.
+- **Nothing stopped two clients sharing one data root.** A hung window is
+  still a live process, and the copy started beside it wrote the same worlds
+  and settings. A named mutex over the data root — not over Pebble, so two
+  clients with different `PEBBLE_DATA_DIR`s still both run — refuses the
+  second and fronts the first.
+- **A crash left no trace.** The log was opened with `"w"`, so the restart
+  destroyed it; Swift's traps went to stderr, which went nowhere; and an
+  unhandled exception closed the window in silence. The previous run is kept
+  as `pebble-log-prev.txt`, stderr is `_dup2`'d onto the log, and
+  `SetUnhandledExceptionFilter` writes the code, the address and what that
+  code means before saying so in a dialog.
+
+Two renderer defects came out of reading for crash causes. `make_buffer` left
+half-built handles behind on its failure path, and `pb_vk_upload_section`
+returned with its slot still marked free — so a failed chunk upload leaked,
+under exactly the memory pressure that had made it fail. Both clean up now,
+`maxMemoryAllocationCount` is logged next to the GPU name (a section costs
+two allocations and that limit is 4096 on common hardware), and `WinHost`
+reports the first failed upload instead of discarding the return value.
+
+**None of this has run on Windows.** It compiles, and the C compiles under
+mingw, but CI cannot press Alt+F4, fill a disk, or start Pebble twice. The
+crash handler, the mutex and the AppData fallback are all still unproven.
+
 ## In progress / next
 
-Nothing. Every Metal pass has a Vulkan counterpart, and every `GameHost` hook
-is implemented. `logo` and `title` have no Vulkan sibling on purpose: the
-Windows title screen draws its art through UI image quads instead.
+Nothing in the renderer. Every Metal pass has a Vulkan counterpart, and every
+`GameHost` hook is implemented. `logo` and `title` have no Vulkan sibling on
+purpose: the Windows title screen draws its art through UI image quads
+instead.
 
 What is left is the kind of thing only real hardware tells you — none of this
 has run on a Windows machine, or an Intel Mac, yet. When it does, start with:
@@ -73,9 +112,11 @@ has run on a Windows machine, or an Intel Mac, yet. When it does, start with:
 - the ultra pass, which is the newest and least exercised,
 - audio latency: waveOut with 512-frame buffers is about 43 ms, and if that
   feels late, WASAPI is the upgrade path,
-- a Mac and a Windows player side by side on one seed, comparing screens.
-  Every difference found so far was found by reading, not by running; that
-  method has stopped yielding, and the next one will not.
+- a Mac and a Windows player side by side on one seed, comparing screens —
+  LAN codes make that setup a thirty-second job now, in either direction.
+
+Every difference found so far was found by reading, not by running; that
+method has stopped yielding, and the next one will not.
 
 ### How the differences were found
 

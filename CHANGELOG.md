@@ -3,6 +3,72 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.3.0 — 2026-08-28 — LAN codes, and a Windows that remembers
+
+### Playing together got one step
+
+- **LAN codes.** Open a world to LAN and the pause menu hands you twelve
+  characters: `Copy code: 18A2-NBZ6-VCQ2`. Read them out, or paste them into
+  any chat app. Whoever you send them to opens *Multiplayer* → *Join By
+  Code*, types them, and is in. **Mac to Windows, Windows to Mac, between
+  people who have never met** — no friend codes to swap first, no accounts,
+  no server in between, and no IP address to read out digit by digit. Macs
+  still find each other automatically over Bonjour as well; the code is the
+  route that exists on every platform, which is why it is now the first thing
+  on the LAN tab.
+- The code carries the host's address, so the same twelve characters also
+  reach a port-forwarded `pebble serve` world.
+- Mistype it and Pebble says so instead of connecting you to a stranger's
+  computer and timing out: twelve check bits ride along, and every possible
+  single-character typo is rejected. The alphabet has no I, L, O or U in it
+  at all, and typing lowercase, dropping the dashes or adding spaces is fine.
+
+### Windows: your worlds stay put
+
+- **Pebble no longer loses its worlds when you start it a different way.**
+  Worlds, settings, the texture pack and the log were all looked up relative
+  to wherever Windows happened to think you were, rather than to Pebble.exe
+  itself. Launch from a shortcut, from a terminal, or from the restart button
+  on a crash dialog, and Pebble quietly built a second, empty `PebbleData`
+  and fell back to the plain textures — a game that appeared to have
+  forgotten everything and changed how it looked. Everything now hangs off
+  the exe, wherever it is started from.
+- If the folder holding Pebble.exe cannot be written to — Program Files, a
+  network drive, the temporary folder Windows uses when you run straight from
+  the zip — worlds go to `%LOCALAPPDATA%\Pebble` instead of failing silently.
+- **Two Pebbles at once no longer scramble each other's saves.** A frozen
+  window is usually still a running program, and the copy you start next to
+  it writes the same worlds and settings; whichever closed last won. Starting
+  a second copy now brings the first one to the front instead. (Two clients
+  with different `PEBBLE_DATA_DIR`s still both run — that is how LAN gets
+  tested on one machine.)
+
+### Windows: when it does crash, it says so
+
+- **A crash writes down what happened** — the fault, where it was, and what
+  that means — and shows it, instead of the window simply vanishing.
+- **The log of the crash survives the restart.** `pebble-log.txt` was wiped
+  on every launch, and the first thing anyone does after a crash is start the
+  game again, so the evidence went first. The previous run is now kept as
+  `pebble-log-prev.txt`. Swift's own error messages, which went nowhere at
+  all, are captured into the log too.
+- **Two real leaks fixed in the renderer.** When a chunk's GPU buffers failed
+  to allocate, the half-built ones were abandoned rather than released —
+  which made the memory pressure that caused the failure steadily worse. The
+  driver's allocation limit is now in the log next to your GPU's name, and a
+  chunk that fails to upload says so rather than leaving a silent hole in the
+  world.
+- **A save file that will not open no longer kills the game on the spot.**
+  Pebble explains which folder is the problem, and keeps running unsaved
+  rather than disappearing before it draws a single frame.
+
+### Everywhere
+
+- **The font can draw its own punctuation now.** Every dash, ellipsis and
+  status dot in the game had been coming out as a question mark — ninety-odd
+  of them, including the ✕ that removes a friend and the ● that says whether
+  one is online.
+
 ## 1.2.4 — 2026-08-26 — the camera, and water
 
 - **Third-person view works on Windows.** F5 was not even wired up as a key,
