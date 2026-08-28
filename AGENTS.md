@@ -14,7 +14,7 @@ Owner: **Xavi** — a young Dutch hobbyist. Explain things to him **simply and i
 
 The earlier state note, for the record: 2026-07-12, the Windows client became a real, playable Pebble — the actual Pebble UI, Faithful terrain, mobs, chunk streaming, and joining Mac-hosted worlds over direct IP.
 
-macOS is unchanged: same app, same saves, same green checks — 613 of them now.
+macOS is unchanged: same app, same saves, same green checks — 621 of them now.
 
 ## Where things live
 
@@ -28,8 +28,8 @@ macOS is unchanged: same app, same saves, same green checks — 613 of them now.
 | `CPebbleAudio` | Audio sink behind a `pb_audio_*` C ABI: winmm's waveOut (plain C, no COM, no SDK). Pebble synthesizes every sound, so a platform only hands over finished stereo samples. | Windows (stubs elsewhere) |
 | `CSQLite` / `CCodecs` | Project-owned SQLite, lodepng + miniz — same engine/codecs on every platform. | all |
 | `PebbleSmokeKit` | The shared golden suites both smoke runners execute. | all |
-| `pebsmoke` / `pebsmokecore` | macOS full suite (613) / portable suite (578) — the one Windows CI runs. | macOS / all |
-| `pebserver` | Headless SMP server: 20 TPS, no host player, direct IP everywhere, Bonjour on macOS. | all |
+| `pebsmoke` / `pebsmokecore` | macOS full suite (621) / portable suite (586) — the one Windows CI runs. | macOS / all |
+| `pebserver` | Headless SMP server: 20 TPS, no host player, direct IP everywhere, LAN beacon + Bonjour on macOS. | all |
 
 ## Rules that must not break
 
@@ -47,8 +47,8 @@ macOS is unchanged: same app, same saves, same green checks — 613 of them now.
 ```
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
-swift run pebsmoke                # macOS: 613 checks (self-assigns a temp data root)
-swift run pebsmokecore            # portable: 578 checks, runs anywhere
+swift run pebsmoke                # macOS: 621 checks (self-assigns a temp data root)
+swift run pebsmokecore            # portable: 586 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server
 ```
@@ -78,7 +78,7 @@ Then read the PNG. Other hooks: `PEBBLE_BOT=1` (physics bot), `PEBBLE_PHOTOBOOTH
 
 ## Multiplayer in one paragraph
 
-Host-authoritative. The host runs the untouched simulation; every guest exists on the host as a puppet `Player` entity driven by ~20 Hz state messages, so mob AI, spawning, item magnets and combat need no special cases. Guest actions replay on the host through the normal Interact/Combat paths; resulting edits fan out as `setBlock` deltas via `WorldHooks.onBlockChanged`. Guests regenerate pristine terrain from the seed and fetch only *modified* chunks (the same VCK1 container the save DB uses), which is why joining is fast and why worldgen determinism is a hard requirement. Identity is a permanent UUID (`Settings.playerId`); servers key player data as `worldId#id:<pid>` so renames keep your stuff. Friend codes (`PEB1…`) are that identity in a shareable string — swapping codes over any chat app *is* the friend request, because Pebble has no central server. **LAN codes** (`JoinCode.swift`) are the other half: the host's *address* in twelve Crockford-base32 characters, shown on the pause menu once a world is open to LAN and typed under Multiplayer → Join By Code. That is the only join path that exists on both platforms — Bonjour discovery lives in the Apple adapter, so a Windows client's LAN list is always empty — and it needs no friendship. `localIPv4()` finds our address by connecting a UDP socket to 192.0.2.1 and reading `getsockname`, because getifaddrs and GetAdaptersAddresses are each half the world.
+Host-authoritative. The host runs the untouched simulation; every guest exists on the host as a puppet `Player` entity driven by ~20 Hz state messages, so mob AI, spawning, item magnets and combat need no special cases. Guest actions replay on the host through the normal Interact/Combat paths; resulting edits fan out as `setBlock` deltas via `WorldHooks.onBlockChanged`. Guests regenerate pristine terrain from the seed and fetch only *modified* chunks (the same VCK1 container the save DB uses), which is why joining is fast and why worldgen determinism is a hard requirement. Identity is a permanent UUID (`Settings.playerId`); servers key player data as `worldId#id:<pid>` so renames keep your stuff. Friend codes (`PEB1…`) are that identity in a shareable string — swapping codes over any chat app *is* the friend request, because Pebble has no central server. **LAN codes** (`JoinCode.swift`) are the other half: the host's *address* in twelve Crockford-base32 characters, shown on the pause menu once a world is open to LAN and typed under Multiplayer → Join By Code. It needs no friendship and no discovery at all, which is why it is the fallback when the network itself is in the way. Discovery proper is `LanBeacon.swift`: the host broadcasts a UDP datagram carrying the same `txt` dictionary Bonjour advertises, and `UDPLanDiscovery` hears it — on every platform. Before that, discovery was Bonjour alone, so a Windows LAN list was permanently empty and no Windows player could ever show as online (presence is a `txt["pid"]` match against discovered sessions). macOS runs both through `CombinedLanDiscovery`, folded on the advertised pid so one Mac host is not listed twice. `localIPv4()` finds our address by connecting a UDP socket to 192.0.2.1 and reading `getsockname`, because getifaddrs and GetAdaptersAddresses are each half the world.
 
 ## Gotchas already paid for
 

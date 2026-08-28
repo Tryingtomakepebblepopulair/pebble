@@ -52,6 +52,7 @@ smokeSkinCoverageSuite()
 smokePackInstallSuite()
 smokeNetProtocolSuite()
 smokeSocketTransportSuite()
+smokeLanBeaconSuite()
 
 // ---------------------------------------------------------------------------
 section("LAN multiplayer (host + guest cores over localhost TCP)")

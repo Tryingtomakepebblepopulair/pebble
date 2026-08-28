@@ -23,6 +23,38 @@ in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
   single-character typo is rejected. The alphabet has no I, L, O or U in it
   at all, and typing lowercase, dropping the dashes or adding spaces is fine.
 
+### Finding each other actually works on Windows now
+
+- **Windows can see games on the network.** It never could: discovery was
+  Bonjour, Bonjour is Apple's, and so the LAN Games list on Windows was
+  permanently, silently empty — a Windows player's only route in was typing
+  an IP address. A host now also announces itself with a small UDP broadcast
+  that both platforms speak, so open a world to LAN and it simply appears in
+  the other person's list, Mac or Windows, and they click it.
+- **You are no longer stuck showing as offline.** A friend counts as online
+  when a discovered game carries their id — and with no discovery on Windows,
+  nobody there was ever online, in either direction. Presence works both ways
+  now.
+- The LAN code still works and is still the answer when the network itself is
+  in the way (guest wifi, a firewall that swallows broadcasts, or two
+  different networks).
+- **If Windows never asked whether Pebble may use the network, nobody can
+  reach you.** The download's LEES-MIJ now says so, and says where to turn it
+  on afterwards — Windows Security → Firewall → Allow an app.
+
+### Windows: sprinting, and the view
+
+- **Sprinting looks like sprinting again.** The field of view was pinned at
+  70° on Windows, so the FOV kick that vanilla uses to tell you you're
+  sprinting — and the one for elytra, and the zoom while drawing a bow — did
+  nothing at all. It comes from the shared camera now, like on the Mac.
+- **The FOV slider in Options works on Windows.** Same cause; it had been
+  ignored entirely.
+- **Surfaces should stop shimmering.** The far clip plane was fixed at 800
+  blocks against a near plane of 0.05, which spends the depth buffer on
+  distance nobody can see and leaves too little precision up close. It follows
+  the render distance now, exactly as on the Mac.
+
 ### Windows: your worlds stay put
 
 - **Pebble no longer loses its worlds when you start it a different way.**

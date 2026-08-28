@@ -67,5 +67,8 @@ public protocol LanDiscovery: AnyObject {
     func stop()
 }
 
-/// nil = no discovery on this platform (direct IP still works)
-public var makeLanDiscovery: () -> LanDiscovery? = { nil }
+/// The UDP beacon works everywhere, so every platform has discovery now; the
+/// Mac replaces this with Bonjour AND the beacon, merged (see
+/// `installAppleNetTransport`). Returning nil would mean an empty LAN list,
+/// which is what Windows had.
+public var makeLanDiscovery: () -> LanDiscovery? = { UDPLanDiscovery() }

@@ -80,6 +80,8 @@ public final class NetHostSession {
 
     unowned let game: GameCore
     let serviceName: String
+    /// announces this world on the LAN for as long as it is open
+    private var beacon: LanBeacon?
     private let listener: NetListener = makeNetListener()
     private var guests: [Guest] = []
     private var stopped = false
@@ -130,19 +132,28 @@ public final class NetHostSession {
                 self.dropGuest(g, announce: true)
             }
         }
-        try listener.start(serviceName: serviceName, fixedPort: fixedPort, txt: [
+        let txt = [
             "pid": dedicated ? "" : (game.settings.playerId ?? ""),
             "name": hostName,
             "world": worldName,
             "ver": PEBBLE_VERSION,
             "srv": dedicated ? "1" : "0",
-        ])
+        ]
+        try listener.start(serviceName: serviceName, fixedPort: fixedPort, txt: txt)
+        // and shout the same thing over UDP, which is the half of discovery
+        // that exists on every platform. The port is read fresh each beacon:
+        // the Apple listener does not know its own until a moment later.
+        let b = LanBeacon(name: serviceName, txt: txt, port: { [weak self] in self?.port ?? 0 })
+        b.start()
+        beacon = b
         installWorldHooks()
     }
 
     public func shutdown() {
         if stopped { return }
         stopped = true
+        beacon?.stop()
+        beacon = nil
         for g in guests {
             g.conn.send(.disconnect(reason: "host closed the world"))
             g.conn.close()

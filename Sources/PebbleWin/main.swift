@@ -564,7 +564,22 @@ mainLoop: while true {
         let dayLight = Float(sky.dayLight)
 
         let aspect = Float(max(1, resizedW)) / Float(max(1, resizedH))
-        let proj = mat4fPerspective(fovYRad: 70 * .pi / 180, aspect: aspect, near: 0.05, far: 800)
+        // Both of these came from camState and the settings on the Mac and
+        // were hard-coded here, which cost two things that look unrelated:
+        //
+        // the FOV carries the sprint kick (×1.15, eased), the elytra kick and
+        // the bow's zoom-in, so pinning it at 70 removed every visual sign
+        // that sprinting was happening at all — and made the Options FOV
+        // slider do nothing;
+        //
+        // and a far plane of 800 against a near plane of 0.05 spends the
+        // depth buffer's precision on distance nobody can see. The Mac ties
+        // it to the render distance, which at the default is 256, and the
+        // difference shows up close to the camera as surfaces flickering
+        // against each other.
+        let far = max(256, Float(game.settings.renderDistance) * 16 * 1.6)
+        let proj = mat4fPerspective(fovYRad: Float(cam.fov * .pi / 180),
+                                    aspect: aspect, near: 0.05, far: far)
         let view = mat4fLookDir(eyeX: 0, eyeY: 0, eyeZ: 0,
                                 dirX: dirX, dirY: dirY, dirZ: dirZ, upX: 0, upY: 1, upZ: 0)
         let viewProj = proj * view
@@ -601,7 +616,7 @@ mainLoop: while true {
             block.append(contentsOf: viewProj.m)
             block.append(contentsOf: sm.m)
             block.append(contentsOf: [sun.0, sun.1, sun.2, dayLight])
-            block.append(contentsOf: [Float(now - t0), 800,           // time, far plane
+            block.append(contentsOf: [Float(now - t0), far,           // time, far plane
                                       shadowsOn && !cam.underwater ? 1 : 0,
                                       cam.underwater ? 1 : 0])
             block.append(contentsOf: [sky.fog.0, sky.fog.1, sky.fog.2,

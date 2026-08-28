@@ -200,3 +200,74 @@ public func smokePortableServerSuite() {
         SocialStore.shared.removeRecent(id: r.id)
     }
 }
+
+/// LAN discovery over the portable UDP beacon — the half of "find a game on
+/// this network" that exists on Windows too. Runs entirely over loopback, so
+/// it proves the socket code without a second machine, and without needing a
+/// network that permits broadcast.
+public func smokeLanBeaconSuite() {
+    section("LAN beacon (portable discovery)")
+
+    // the wire format, which has to survive a hostile packet unaided: the
+    // beacon port is shared with whatever else on the network fancies it
+    let txt = ["pid": "abc-123", "world": "My World", "srv": "0", "ver": PEBBLE_VERSION]
+    let packet = encodeLanBeacon(name: "Xavi — My World", port: 25585, txt: txt)
+    if let back = decodeLanBeacon(packet) {
+        check("beacon round-trips", back.port == 25585 && back.name == "Xavi — My World"
+            && back.txt["pid"] == "abc-123" && back.txt["world"] == "My World")
+    } else {
+        check("beacon round-trips", false)
+    }
+    check("beacon fits one datagram", packet.count <= 512, "\(packet.count) bytes")
+    check("beacon rejects what isn't ours",
+          decodeLanBeacon(Data()) == nil
+          && decodeLanBeacon(Data("hello".utf8)) == nil
+          && decodeLanBeacon(Data("PEB1\nname=x\n".utf8)) == nil          // no port
+          && decodeLanBeacon(Data("PEB1\nport=0\n".utf8)) == nil          // port zero
+          && decodeLanBeacon(Data(repeating: 0xFF, count: 2048)) == nil)
+
+    // and the live path: a host beacons, a listener hears it, over loopback
+    let savedFactory = makeNetListener
+    makeNetListener = { SocketListener() }
+    defer { makeNetListener = savedFactory }
+
+    let host = GameCore()
+    host.settings.playerName = "BeaconHost"
+    host.createWorld(name: "beacontest", seedText: "4242", mode: 1, difficulty: 2)
+    let worldId = host.worldRec?.id ?? ""
+    check("beacon host opened to LAN", host.startLanHost())
+
+    var seen: [DiscoveredGame] = []
+    let disco = UDPLanDiscovery()
+    disco.onUpdate = { seen = $0 }
+    disco.start()
+
+    let hostPid = host.settings.playerId ?? ""
+    func pumpUntil(_ seconds: Double, _ cond: () -> Bool) -> Bool {
+        let deadline = monotonicNow() + seconds
+        while monotonicNow() < deadline {
+            if cond() { return true }
+            _ = host.frame(dtMs: 50)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        return cond()
+    }
+    let heard = pumpUntil(10) { seen.contains { $0.txt["pid"] == hostPid } }
+    check("a hosted world is discovered on the LAN", heard,
+          "heard \(seen.count) beacon(s) in 10s")
+    if let mine = seen.first(where: { $0.txt["pid"] == hostPid }) {
+        // exactly what the game list and the friends list each read
+        check("the beacon carries what the list needs",
+              mine.txt["world"] == "beacontest" && mine.txt["srv"] == "0"
+              && mine.name.contains("beacontest"), "name: \(mine.name)")
+        check("a discovered host counts a friend online", mine.txt["pid"] == hostPid)
+    } else {
+        check("the beacon carries what the list needs", false)
+        check("a discovered host counts a friend online", false)
+    }
+
+    disco.stop()
+    host.exitToTitle()
+    host.deleteWorld(worldId)
+    check("beacon test world deleted", host.db.getWorld(worldId) == nil)
+}

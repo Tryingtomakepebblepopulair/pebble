@@ -19,7 +19,7 @@
 
 Pebble is an original fan re-creation inspired by Minecraft: Java Edition 1.20. It is **not affiliated with, endorsed by, or connected to Mojang Studios or Microsoft** in any way, and contains no Mojang code or assets. Full statement in [Disclaimer](#disclaimer) below.
 
-> **About this edition.** Pebble was created by [Brian Gao](https://github.com/thebriangao/pebble) — all credit for the original engine goes to him (MIT licensed, license preserved here). This repository is the **multiplayer edition**: on top of the original 1.0.3 it adds LAN co-op you join with a twelve-character code from any computer, standalone SMP-style dedicated servers (`pebble serve`), permanent player identities with friend codes, custom skins, visible armor and held items with a first-person viewmodel, and a game-speed slider — see the [CHANGELOG](CHANGELOG.md) for everything.
+> **About this edition.** Pebble was created by [Brian Gao](https://github.com/thebriangao/pebble) — all credit for the original engine goes to him (MIT licensed, license preserved here). This repository is the **multiplayer edition**: on top of the original 1.0.3 it adds LAN co-op that finds itself on any computer (and a twelve-character code for when it can't), standalone SMP-style dedicated servers (`pebble serve`), permanent player identities with friend codes, custom skins, visible armor and held items with a first-person viewmodel, and a game-speed slider — see the [CHANGELOG](CHANGELOG.md) for everything.
 
 ## ⬇ Download
 
@@ -43,7 +43,7 @@ Or browse [all releases](../../releases/latest).
 
 Every zip ships a short text file with the same instructions. Prefer to build it yourself? One command: see [Install](#install--run).
 
-> **Pebble 1.3.0 is a beta.** The engine is pinned by 613 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
+> **Pebble 1.3.0 is a beta.** The engine is pinned by 621 golden regression checks, but a game of this scope absolutely has bugs we haven't found yet — we just don't know where they are. If you hit one, [opening an issue](../../issues) would mean the world to us, and a pull request with a fix even more. See [Reporting bugs & contributing](#reporting-bugs--contributing) for what to include.
 
 ## Sharing a build
 
@@ -106,7 +106,7 @@ still builds the zip — it just warns that the result is not notarized.
 
 ## Features
 
-- **Multiplayer: LAN, servers, and friends** — play together on the same WiFi with zero setup. The host presses Esc → *Open to LAN* and reads out the **LAN code** on the button (`18A2-NBZ6-VCQ2`); everyone else types it under *Multiplayer* → *Join By Code*. That path works Mac-to-Windows and Windows-to-Mac, between people who have never met, with no accounts and no server in the middle — Macs additionally see each other listed automatically over Bonjour. Or run a standalone SMP-style server with `pebble serve` that stays online with no host player and accepts internet joins by address (Multiplayer → *Servers*). Host-authoritative: building, mining, combat, item pickup, chat, and the day/weather clock all sync live, while guests regenerate untouched terrain from the world seed so only edited chunks cross the network. Every player has a permanent identity (rename freely, keep your inventory on every server), a local friends list with live presence and one-click Join, and a Recent Players list to add friends from. (Guests can't use portals or live-sync containers yet — see CHANGELOG.)
+- **Multiplayer: LAN, servers, and friends** — play together on the same WiFi with zero setup. The host presses Esc → *Open to LAN* and the world appears in everyone else's *Multiplayer* → *LAN Games* list — Mac and Windows alike, over a UDP beacon both platforms speak (Macs also still find each other over Bonjour). When the network is in the way, the same button carries a **LAN code** (`18A2-NBZ6-VCQ2`) to read out or paste; the other person types it under *Join By Code* and is in. Either route works Mac-to-Windows and Windows-to-Mac, between people who have never met, with no accounts and no server in the middle. Or run a standalone SMP-style server with `pebble serve` that stays online with no host player and accepts internet joins by address (Multiplayer → *Servers*). Host-authoritative: building, mining, combat, item pickup, chat, and the day/weather clock all sync live, while guests regenerate untouched terrain from the world seed so only edited chunks cross the network. Every player has a permanent identity (rename freely, keep your inventory on every server), a local friends list with live presence and one-click Join, and a Recent Players list to add friends from. (Guests can't use portals or live-sync containers yet — see CHANGELOG.)
 - **Custom skins** — load any standard 64×64 Minecraft skin PNG from the title screen (Skins…), or export the current skin as a template and draw your own; the hat/jacket overlay layer is baked on.
 - **Visible gear** — armor shows on player bodies (pack textures, all materials), held items render in hands as extruded 3D sprites with swing animations, shields raise when blocking, and first person gets a real viewmodel (arm in your skin, eat/draw/block animations) — synced across multiplayer.
 - **Full survival loop** — mining with tool tiers, hunger/saturation, XP, sleeping, fall damage, drowning, fire, status effects, death messages, respawn/keep-inventory game rules.
@@ -168,7 +168,7 @@ Sources/PebbleCore/   the engine — headless, no AppKit, fully testable
   Render/             section mesher, texture atlas, entity models
   Game/               GameCore tick orchestrator, SQLite saves, settings
 Sources/Pebble/       the macOS app — window, Metal renderer, UI, audio, input
-Sources/pebsmoke/     golden test harness (613 checks against goldens/*.json)
+Sources/pebsmoke/     golden test harness (621 checks against goldens/*.json)
 goldens/              golden baseline files pinning engine behavior
 packaging/            Info.plist, icon, logo, title art, bundled Faithful textures
 pebble                the build/install/test CLI
@@ -178,7 +178,7 @@ A deeper tour lives in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## The determinism contract
 
-Pebble's engine is **fully deterministic**: a portable fdlibm implementation of `sin/cos/atan2` (pure IEEE-754 operations, no platform math library), 32-bit-wrapping integer hashes, and seeded RNG everywhere mean the same seed produces the identical world — bit for bit, on any machine, across releases. That contract is enforced by golden baseline files: `pebble test` runs 613 checks covering terrain hashes over full chunk pipelines, a 55-mob zoo ticked 200 steps and compared at checkpoints, 911 transcendental-math probes, recipe/enchant/loot RNG lockstep, a redstone contraption timeline, and independent derivations of vanilla physics constants. The goldens are the contract that keeps the engine honest — a change that moves a single block in an existing world fails the suite.
+Pebble's engine is **fully deterministic**: a portable fdlibm implementation of `sin/cos/atan2` (pure IEEE-754 operations, no platform math library), 32-bit-wrapping integer hashes, and seeded RNG everywhere mean the same seed produces the identical world — bit for bit, on any machine, across releases. That contract is enforced by golden baseline files: `pebble test` runs 621 checks covering terrain hashes over full chunk pipelines, a 55-mob zoo ticked 200 steps and compared at checkpoints, 911 transcendental-math probes, recipe/enchant/loot RNG lockstep, a redstone contraption timeline, and independent derivations of vanilla physics constants. The goldens are the contract that keeps the engine honest — a change that moves a single block in an existing world fails the suite.
 
 ## Development hooks
 
@@ -211,7 +211,7 @@ Found a bug? [Open an issue](https://github.com/thebriangao/pebble/issues). To h
 - **Settings that matter**: render distance and whether ultra graphics are on.
 - **Screenshots or video** for anything visual.
 - For crashes: the crash report from `~/Library/Logs/DiagnosticReports`, and terminal output if you launched with `pebble run` from a terminal.
-- If the engine itself seems wrong (worldgen, physics, redstone): the tail of `pebble test` — it should print `613 passed, 0 failed`.
+- If the engine itself seems wrong (worldgen, physics, redstone): the tail of `pebble test` — it should print `621 passed, 0 failed`.
 
 Even better than a bug report is a **pull request with a fix** — see [CONTRIBUTING.md](CONTRIBUTING.md) for the build/test workflow and the conventions that are load-bearing (registration order, RNG discipline, determinism rules). PRs of all sizes are wanted, from typo fixes to subsystem work.
 

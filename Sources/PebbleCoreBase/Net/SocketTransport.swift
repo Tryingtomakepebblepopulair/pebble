@@ -15,16 +15,16 @@ import Glibc
 
 #if os(Windows)
 typealias PebSocket = SOCKET
-private let PEB_BAD_SOCKET: PebSocket = INVALID_SOCKET
+let PEB_BAD_SOCKET: PebSocket = INVALID_SOCKET
 /// WinSock needs a one-time init before any socket call
-private let wsaReady: Bool = {
+let wsaReady: Bool = {
     var data = WSADATA()
     return WSAStartup(0x0202, &data) == 0
 }()
 #else
 typealias PebSocket = Int32
-private let PEB_BAD_SOCKET: PebSocket = -1
-private let wsaReady = true
+let PEB_BAD_SOCKET: PebSocket = -1
+let wsaReady = true
 #endif
 
 public struct SocketError: Error, CustomStringConvertible, LocalizedError {
@@ -35,7 +35,9 @@ public struct SocketError: Error, CustomStringConvertible, LocalizedError {
 
 // ---- tiny platform shims ----------------------------------------------------
 
-private func pebCloseSocket(_ s: PebSocket) {
+// internal, not private: the LAN beacon (LanBeacon.swift) speaks UDP through
+// the same three shims rather than growing its own copy of them
+func pebCloseSocket(_ s: PebSocket) {
     #if os(Windows)
     closesocket(s)
     #else

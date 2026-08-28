@@ -769,7 +769,10 @@ func installAppleUIServices() {
     }
     platformOpenSkinsScreen = { ui, game in ui.open(SkinsScreen(), game) }
     platformLoadSkinBlob = { (try? Data(contentsOf: customSkinURL)) ?? Data() }
-    makeLanDiscovery = { AppleLanDiscovery() }
+    // Bonjour finds Macs the way it always has; the portable beacon adds the
+    // Windows PCs it cannot see. Merged, so a Mac host found twice is listed
+    // once (CombinedLanDiscovery folds on the advertised player id).
+    makeLanDiscovery = { CombinedLanDiscovery([AppleLanDiscovery(), UDPLanDiscovery()]) }
 }
 
 /// Bonjour browsing wrapped in the portable discovery protocol — endpoints
