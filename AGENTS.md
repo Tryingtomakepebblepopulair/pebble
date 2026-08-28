@@ -47,13 +47,21 @@ macOS is unchanged: same app, same saves, same green checks — 621 of them now.
 ```
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
-swift run pebsmoke                # macOS: 621 checks (self-assigns a temp data root)
+swift run -c release pebsmoke     # macOS: 621 checks (self-assigns a temp data root)
 swift run pebsmokecore            # portable: 586 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server
 ```
 
-Windows binaries are never built locally — see CI below.
+**Run the suites in release.** In a debug build the LAN e2e checks are too
+slow and `setBlock reaches the guest` fails every run — not a regression, just
+debug. CI uses `-c release`; so should you.
+
+Windows binaries are never built locally — see CI below. Note that portable
+code can have its *behaviour* verified there, not only its compilation: a
+check in `PebbleSmokeKit` runs on the Windows runner via `pebsmokecore`, which
+is how the UDP beacon's WinSock path is proven. Only `Sources/PebbleWin/*`
+(Win32 + Vulkan) is compile-only.
 
 ## CI (`.github/workflows/ci.yml`)
 
