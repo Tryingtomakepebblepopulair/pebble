@@ -14,7 +14,7 @@ Owner: **Xavi** — a young Dutch hobbyist. Explain things to him **simply and i
 
 The earlier state note, for the record: 2026-07-12, the Windows client became a real, playable Pebble — the actual Pebble UI, Faithful terrain, mobs, chunk streaming, and joining Mac-hosted worlds over direct IP.
 
-macOS is unchanged: same app, same saves, same green checks — 621 of them now.
+macOS is unchanged: same app, same saves, same green checks — 628 of them now.
 
 ## Where things live
 
@@ -28,7 +28,7 @@ macOS is unchanged: same app, same saves, same green checks — 621 of them now.
 | `CPebbleAudio` | Audio sink behind a `pb_audio_*` C ABI: winmm's waveOut (plain C, no COM, no SDK). Pebble synthesizes every sound, so a platform only hands over finished stereo samples. | Windows (stubs elsewhere) |
 | `CSQLite` / `CCodecs` | Project-owned SQLite, lodepng + miniz — same engine/codecs on every platform. | all |
 | `PebbleSmokeKit` | The shared golden suites both smoke runners execute. | all |
-| `pebsmoke` / `pebsmokecore` | macOS full suite (621) / portable suite (586) — the one Windows CI runs. | macOS / all |
+| `pebsmoke` / `pebsmokecore` | macOS full suite (628) / portable suite (593) — the one Windows CI runs. | macOS / all |
 | `pebserver` | Headless SMP server: 20 TPS, no host player, direct IP everywhere, LAN beacon + Bonjour on macOS. | all |
 
 ## Rules that must not break
@@ -47,8 +47,8 @@ macOS is unchanged: same app, same saves, same green checks — 621 of them now.
 ```
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
-swift run -c release pebsmoke     # macOS: 621 checks (self-assigns a temp data root)
-swift run pebsmokecore            # portable: 586 checks, runs anywhere
+swift run -c release pebsmoke     # macOS: 628 checks (self-assigns a temp data root)
+swift run pebsmokecore            # portable: 593 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server
 ```

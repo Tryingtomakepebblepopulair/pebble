@@ -3,6 +3,27 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.3.1 — 2026-08-28 — heads, and a Pebble that starts
+
+- **Your skin's head is back.** Most skins keep their hair and face in the
+  second "hat" layer, and the player model has no shell to draw that layer on
+  — it has to be baked onto the base one. That only ever happened for your own
+  skin file, read from disk, on the Mac. A skin arriving over the network was
+  used raw on both platforms, and the Windows client had no local path either,
+  so any skin built that way showed up with a blank head. Now baked wherever a
+  custom skin becomes pixels.
+- **Pebble could refuse to start and never say why.** The "is another Pebble
+  already running?" check read Windows' error code a moment too late — after a
+  closure returned and a global was written, either of which can replace it.
+  A stale code meant Pebble quietly closed itself on startup. It is read on the
+  next line now, and it will only ever refuse when it can actually put the
+  other window in front of you: a lock held by something with no window is
+  noted in the log and stepped over, because closing without explanation is
+  worse than the problem it was guarding.
+- **The crash handler goes in first.** It was installed after the data root and
+  the instance check, so the earliest failures — the ones where the window
+  never appears — were the only ones left with nothing to show for themselves.
+
 ## 1.3.0 — 2026-08-28 — LAN codes, and a Windows that remembers
 
 ### Playing together got one step

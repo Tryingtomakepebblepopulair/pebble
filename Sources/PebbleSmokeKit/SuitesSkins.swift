@@ -134,3 +134,53 @@ public func smokePackInstallSuite() {
     check("a known item resolves", items["diamond_sword"] != nil,
           items["diamond_sword"] == nil ? "no diamond_sword" : "")
 }
+
+/// The skin overlay layer, which most real skins keep their hair and face in.
+/// The player model has no shell boxes to draw a second layer on, so it has
+/// to be baked down — and when it wasn't, the head came out blank.
+public func smokeSkinOverlaySuite() {
+    section("skin overlay (hat/jacket baked onto the base layer)")
+
+    // a skin in the shape of the real complaint: nothing on the base head,
+    // everything in the hat layer
+    var img = RGBAImage(width: 64, height: 64,
+                        pixels: [UInt8](repeating: 0, count: 64 * 64 * 4))
+    func put(_ x: Int, _ y: Int, _ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8) {
+        let i = (y * 64 + x) * 4
+        img.pixels[i] = r; img.pixels[i + 1] = g; img.pixels[i + 2] = b; img.pixels[i + 3] = a
+    }
+    put(40, 8, 200, 30, 30, 255)     // hat layer, over the head's front face
+    put(20, 36, 30, 200, 30, 255)    // jacket layer, over the body
+    put(44, 36, 30, 30, 200, 255)    // right sleeve, over the arm
+    put(4, 36, 200, 200, 30, 255)    // right pants, over the leg
+    // the base head is fully transparent — which is what made it invisible
+    check("the head starts empty", img.pixels[((8 * 64) + 8) * 4 + 3] == 0)
+
+    flattenSkinOverlay(&img)
+
+    func px(_ x: Int, _ y: Int) -> (UInt8, UInt8, UInt8, UInt8) {
+        let i = (y * 64 + x) * 4
+        return (img.pixels[i], img.pixels[i + 1], img.pixels[i + 2], img.pixels[i + 3])
+    }
+    check("hat bakes onto the head", px(8, 8) == (200, 30, 30, 255), "got \(px(8, 8))")
+    check("jacket bakes onto the body", px(20, 20) == (30, 200, 30, 255), "got \(px(20, 20))")
+    check("sleeve bakes onto the arm", px(44, 20) == (30, 30, 200, 255), "got \(px(44, 20))")
+    check("pants bake onto the leg", px(4, 20) == (200, 200, 30, 255), "got \(px(4, 20))")
+
+    // a transparent overlay pixel must leave the base alone, or every skin
+    // whose hat layer is empty would lose its face instead
+    var keep = RGBAImage(width: 64, height: 64,
+                         pixels: [UInt8](repeating: 0, count: 64 * 64 * 4))
+    let i = ((8 * 64) + 8) * 4
+    keep.pixels[i] = 111; keep.pixels[i + 1] = 122; keep.pixels[i + 2] = 133
+    keep.pixels[i + 3] = 255
+    flattenSkinOverlay(&keep)
+    check("an empty overlay leaves the base untouched",
+          keep.pixels[i] == 111 && keep.pixels[i + 1] == 122 && keep.pixels[i + 2] == 133)
+
+    // the legacy 64x32 format has no second layer; baking would read past it
+    var legacy = RGBAImage(width: 64, height: 32,
+                           pixels: [UInt8](repeating: 7, count: 64 * 32 * 4))
+    flattenSkinOverlay(&legacy)
+    check("a 64x32 skin is left alone", legacy.pixels.allSatisfy { $0 == 7 })
+}

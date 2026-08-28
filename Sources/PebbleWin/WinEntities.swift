@@ -124,8 +124,15 @@ final class EntityView {
             texW = img.width
             texH = img.height
         }
-        if let blob = skinPNG, let img = pebDecodePNG(blob),
-           img.width * geo.model.texH == img.height * geo.model.texW {
+        if let blob = skinPNG, let decoded = pebDecodePNG(blob),
+           decoded.width * geo.model.texH == decoded.height * geo.model.texW {
+            // the hat/jacket/sleeve/pants layer has to be baked onto the base
+            // one — the model has no shell boxes to draw it on. Without this
+            // any skin that keeps its hair or face in the overlay renders
+            // with a blank head, which is exactly what it looked like.
+            var img = RGBAImage(width: decoded.width, height: decoded.height,
+                                pixels: decoded.pixels)
+            flattenSkinOverlay(&img)
             pixels = img.pixels
             texW = img.width
             texH = img.height

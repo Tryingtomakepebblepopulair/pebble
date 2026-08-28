@@ -33,11 +33,18 @@ func nowMs() -> Double { monotonicNow() * 1000 }
 // The claim on it comes before the log, because a second Pebble must not
 // rotate away the log of the one already running. Then the log opens, and the
 // crash handler goes in before anything can crash.
+// The crash handler goes in FIRST, before anything can crash. It was after
+// the data root and the instance claim, which left the earliest and most
+// confusing failures — the ones where Pebble closes before drawing a frame —
+// as the only ones with nothing to show for themselves.
+installCrashHandler()
+
 let dataRoot = chooseDataRoot()
 if getenv("PEBBLE_DATA_DIR") == nil { vcOverrideDataDir(dataRoot.path) }
 
+// claimDataRoot brings the other window forward itself, and returns false
+// only when there really is one to bring forward
 if !claimDataRoot(dataRoot.path) {
-    focusRunningPebble()
     notice("""
         Pebble is already running.
 
@@ -51,7 +58,6 @@ if !claimDataRoot(dataRoot.path) {
 }
 
 openLog(dataRoot: dataRoot.path)
-installCrashHandler()
 
 plog("Pebble \(PEBBLE_VERSION) — Windows client (Vulkan)")
 plog("exe folder: \(exeDir())")

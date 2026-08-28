@@ -21,33 +21,6 @@ func customPlayerSkin() -> RGBAImage? {
     return img
 }
 
-/// modern skins carry a second layer (hat/jacket/sleeves/pants) meant for a
-/// slightly larger shell around each part; the player model has no shell
-/// boxes, so bake the overlay onto the base layer instead. the model mirrors
-/// the right arm/leg onto the left, so only the right-side overlays apply.
-func flattenSkinOverlay(_ img: inout RGBAImage) {
-    let s = img.width / 64
-    func blend(_ sx: Int, _ sy: Int, _ w: Int, _ h: Int, _ dx: Int, _ dy: Int) {
-        for py in 0..<(h * s) {
-            for px in 0..<(w * s) {
-                let si = ((sy * s + py) * img.width + sx * s + px) * 4
-                let di = ((dy * s + py) * img.width + dx * s + px) * 4
-                let a = Int(img.pixels[si + 3])
-                if a == 0 { continue }
-                for c in 0..<3 {
-                    let o = Int(img.pixels[si + c]), b = Int(img.pixels[di + c])
-                    img.pixels[di + c] = UInt8((o * a + b * (255 - a)) / 255)
-                }
-                img.pixels[di + 3] = 255
-            }
-        }
-    }
-    blend(32, 0, 32, 16, 0, 0)      // hat → head
-    blend(16, 32, 24, 16, 16, 16)   // jacket → body
-    blend(40, 32, 16, 16, 40, 16)   // right sleeve → arm
-    blend(0, 32, 16, 16, 0, 16)     // right pants → leg
-}
-
 /// straight-RGBA → PNG bytes (template export of the procedural skin)
 func encodePNG(_ img: RGBAImage) -> Data? {
     guard let provider = CGDataProvider(data: Data(img.pixels) as CFData),

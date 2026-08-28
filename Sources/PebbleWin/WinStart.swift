@@ -123,16 +123,41 @@ func claimDataRoot(_ root: String) -> Bool {
         h = (h ^ UInt64(b)) &* 0x1000_0000_01b3
     }
     let name = "Local\\Pebble-" + String(h, radix: 16)
-    instanceMutex = name.withCString(encodedAs: UTF16.self) { CreateMutexW(nil, true, $0) }
-    return instanceMutex != nil && GetLastError() != DWORD(ERROR_ALREADY_EXISTS)
+    var alreadyRunning = false
+    instanceMutex = name.withCString(encodedAs: UTF16.self) { n -> HANDLE? in
+        let handle = CreateMutexW(nil, true, n)
+        // GetLastError has to be read HERE, on the next line, with nothing
+        // in between. It was being read after the closure returned and after
+        // a store to a global — and any of that may make a Win32 call of its
+        // own and replace the code we came for. Reading a stale
+        // ERROR_ALREADY_EXISTS means Pebble refuses to start, closes itself,
+        // and never says why.
+        alreadyRunning = GetLastError() == DWORD(ERROR_ALREADY_EXISTS)
+        return handle
+    }
+    guard instanceMutex != nil else { return true }   // no mutex, no opinion
+    if !alreadyRunning { return true }
+
+    // Somebody holds it. Only refuse if we can actually put their window in
+    // front of the player: a mutex held by a process with no window is a
+    // zombie we cannot point at, and "Pebble closed itself and said nothing"
+    // is a worse outcome than the double-write this guards against.
+    guard focusRunningPebble() else {
+        plog("data root claimed by a process with no window — starting anyway")
+        return true
+    }
+    return false
 }
 
-/// bring the Pebble that is already running to the front, if it can be found
-func focusRunningPebble() {
-    let hwnd = "PebbleWindow".withCString(encodedAs: UTF16.self) { FindWindowW($0, nil) }
-    guard let hwnd else { return }
+/// bring the Pebble that is already running to the front. False when there is
+/// no such window to find.
+@discardableResult
+func focusRunningPebble() -> Bool {
+    guard let hwnd = ("PebbleWindow".withCString(encodedAs: UTF16.self) { FindWindowW($0, nil) })
+    else { return false }
     if IsIconic(hwnd) { ShowWindow(hwnd, SW_RESTORE) }
     SetForegroundWindow(hwnd)
+    return true
 }
 
 /// a plain message box — no "FATAL", because not everything worth saying is

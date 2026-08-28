@@ -66,9 +66,14 @@ final class EntityRendererM {
         // image proportions agree; otherwise the procedural skin
         var skinW = built.skin.w, skinH = built.skin.h
         var pixels = built.skin.data
-        if let blob = skinPNG, let img = decodePNG(blob),
+        if let blob = skinPNG, var img = decodePNG(blob),
            img.width * built.model.texH == img.height * built.model.texW {
-            // another player's custom skin (traveled in hello/playerJoin)
+            // another player's custom skin (traveled in hello/playerJoin).
+            // Bake its overlay layer, exactly as we do for our own: this
+            // branch used the raw PNG, so a friend whose skin draws its hair
+            // in the hat layer arrived here with no hair — and, often, no
+            // visible head at all.
+            flattenSkinOverlay(&img)
             skinW = img.width
             skinH = img.height
             pixels = img.pixels

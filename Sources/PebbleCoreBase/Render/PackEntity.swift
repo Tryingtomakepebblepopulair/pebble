@@ -75,3 +75,41 @@ public func pebPackItemIcons(zip: Data) -> [String: [UInt8]] {
     }
     return icons
 }
+
+/// Modern skins carry a second layer — hat, jacket, sleeves, pant legs —
+/// meant to be drawn on a slightly larger shell around each body part. The
+/// player model has no shell boxes, so the overlay is baked onto the base
+/// layer instead. The model mirrors the right arm and leg onto the left, so
+/// only the right-side overlays apply.
+///
+/// This lived on the Mac and ran for one skin only: your own, loaded from
+/// disk. Every skin that arrived over the network went to the renderer raw,
+/// on both platforms, and the Windows client had no local path either — so a
+/// skin that draws its hair or face in the hat layer, which is most of them,
+/// showed up with a blank head. Portable now, and applied wherever a custom
+/// skin becomes entity pixels.
+public func flattenSkinOverlay(_ img: inout RGBAImage) {
+    // 64x64 layouts only, at any integer scale; the legacy 64x32 skin has no
+    // second layer to bake
+    guard img.width == img.height, img.width >= 64, img.width % 64 == 0 else { return }
+    let s = img.width / 64
+    func blend(_ sx: Int, _ sy: Int, _ w: Int, _ h: Int, _ dx: Int, _ dy: Int) {
+        for py in 0..<(h * s) {
+            for px in 0..<(w * s) {
+                let si = ((sy * s + py) * img.width + sx * s + px) * 4
+                let di = ((dy * s + py) * img.width + dx * s + px) * 4
+                let a = Int(img.pixels[si + 3])
+                if a == 0 { continue }
+                for c in 0..<3 {
+                    let o = Int(img.pixels[si + c]), b = Int(img.pixels[di + c])
+                    img.pixels[di + c] = UInt8((o * a + b * (255 - a)) / 255)
+                }
+                img.pixels[di + 3] = 255
+            }
+        }
+    }
+    blend(32, 0, 32, 16, 0, 0)      // hat → head
+    blend(16, 32, 24, 16, 16, 16)   // jacket → body
+    blend(40, 32, 16, 16, 40, 16)   // right sleeve → arm
+    blend(0, 32, 16, 16, 0, 16)     // right pants → leg
+}
