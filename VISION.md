@@ -14,7 +14,7 @@ That sentence is not marketing; it is the reason every feature since 1.1.0 exist
 
 **2. You can play together.** Same WiFi: zero setup, the world just appears in the list. Across the internet: a real server (`pebble serve`) that stays up without a host player, joined by address. Across platforms: a Mac and a Windows PC in the same world, because the simulation is identical on both.
 
-**3. It stays honest.** 550 frozen golden checks pin worldgen, physics and protocol bit-for-bit. The Mac app never breaks so that something else can move forward. And when something cannot be done — a Windows build I cannot test, a friend-request popup with no server to route it — the answer is "here is why, and here is what works instead", never a stub that pretends.
+**3. It stays honest.** 601 frozen golden checks pin worldgen, physics and protocol bit-for-bit. The Mac app never breaks so that something else can move forward. And when something cannot be done — or cannot be verified, like a Windows build nobody has yet run on a Windows machine — the answer is "here is why, here is what was checked instead, and here is what is still unknown", never a stub that pretends.
 
 ## Decisions already made
 
@@ -29,13 +29,13 @@ These are settled; revisit them deliberately, not by accident.
 
 ## Roadmap
 
-**Done** — single-player survival across three dimensions; LAN co-op; standalone SMP servers; permanent identities and friend codes; custom skins; visible armor, held items and shields; the game-speed slider; published on GitHub with downloadable releases; the portable core, server and golden suite running on Windows; a Windows client that renders and joins real worlds.
+**Done** — single-player survival across three dimensions; LAN co-op; standalone SMP servers; permanent identities and friend codes; custom skins; visible armor, held items and shields; the game-speed slider. And the Windows port, in full: every render pass the Mac has, synthesized audio, animated mobs in their gear, the first-person viewmodel, sun shadows and the post chain, and resource packs installed the same way on both platforms. One-click downloads for Windows and macOS, built and published by CI; the Mac build is universal, so Intel Macs run it too.
 
-**Now** — finishing the Windows client until it is not "the Windows version" but simply Pebble: audio (PORTING 10), animated entities, the first-person viewmodel, and a packaged download that is as easy as the Mac one (PORTING 14).
+**Now** — someone playing it. Nothing here has run on a Windows machine or an Intel Mac; CI proves it compiles and that worlds are bit-identical, which is not the same as proving it looks right. The next real progress is a session with a Mac and a Windows player side by side, and a list of whatever does not match.
 
-**Next** — the gaps the CHANGELOG already admits: portals for guests, live-syncing containers, commands for guests. Then the smaller kindnesses: name tags, other players' skins everywhere, shadows and bloom on Windows.
+**Next** — the gaps the CHANGELOG already admits: portals for guests, live-syncing containers, commands for guests. Then the smaller kindnesses: name tags, other players' skins everywhere.
 
-**Someday, maybe** — a Pebble website with a download page and an SMP setup helper; Linux, which is mostly free once Vulkan is real; mobile or console, which is not.
+**Someday, maybe** — a Pebble website with a download page and an SMP setup helper; Linux, which is mostly free now that Vulkan is real; signing and notarization so neither OS warns on first launch, which costs money rather than effort; mobile or console, which is neither.
 
 ## Non-goals
 

@@ -6,31 +6,60 @@
 
 Bug reports mean the world to us. [Open an issue](https://github.com/thebriangao/pebble/issues) and include the critical bits that let us reproduce it:
 
-1. **macOS version + Mac model/chip** (e.g. "macOS 15.2, M2 MacBook Air")
+1. **Which platform**, and the machine:
+   - macOS: version + model/chip (e.g. "macOS 15.2, M2 MacBook Air", or
+     "macOS 14.6, 2019 Intel MacBook Pro")
+   - Windows: version + GPU (e.g. "Windows 11, RTX 3060") — the GPU matters
+     most, since the renderer is Vulkan there
 2. **Pebble version** (bottom-left of the title screen)
 3. **Steps**: what you did, what happened, what you expected
 4. **World context** for in-world bugs: seed, dimension, coordinates (all on the F3 overlay)
 5. **Settings**: render distance, ultra graphics on/off
-6. **Evidence**: screenshots/video for visual bugs; `~/Library/Logs/DiagnosticReports` for crashes; the tail of `pebble test` if the engine seems wrong (expected: `456 passed, 0 failed`)
+6. **Evidence**: screenshots/video for visual bugs; the tail of `pebble test`
+   if the engine seems wrong (expected: `601 passed, 0 failed` on macOS,
+   `566` for the portable suite). For crashes: on macOS
+   `~/Library/Logs/DiagnosticReports`, on Windows `pebble-log.txt` next to
+   `Pebble.exe`.
+
+**Something that looks different between macOS and Windows is a bug worth
+reporting**, even a small one. The two renderers are separate code, so a
+screenshot from each — same seed, same settings, same spot — is the single
+most useful thing you can attach.
 
 Even better than a report is a PR with the fix — the rest of this file tells you how to make one that lands.
 
 ## Setup
 
+**macOS:**
+
 ```bash
 xcode-select --install        # Swift toolchain (Swift 6, macOS 14+ SDK)
 git clone https://github.com/thebriangao/pebble.git && cd pebble
 swift build                   # debug build, ~35s clean
-swift run -c release pebsmoke # the test suite — must print "456 passed, 0 failed"
+swift run -c release pebsmoke # the test suite — must print "601 passed, 0 failed"
 ./pebble install              # optional: build + install the real app
 ```
+
+**Windows:** install a Swift 6 toolchain from [swift.org](https://swift.org/install/windows/), then
+
+```powershell
+swift build -c release --product PebbleWin      # the client
+swift build -c release --product pebsmokecore   # the portable suite
+.\.build\release\pebsmokecore.exe             # must print "566 passed, 0 failed"
+```
+
+Most of the codebase is portable, so a change usually only needs building on
+the platform you have. `PORTING/STATUS.md` explains how to check the
+Windows-only sources from a Mac — cross-compiling the C backends with mingw
+and type-checking the `#if os(Windows)` Swift against the core — which is how
+the port was built in the first place.
 
 There is no `.xcodeproj` and there never will be — the whole workflow is SwiftPM + the `./pebble` CLI. You can still open the folder in Xcode ("Open Package") if you want an IDE; just don't commit any generated project files.
 
 ## Before you open a PR
 
 1. `swift build -c release` — clean, **zero warnings**. The codebase is warning-free and stays that way.
-2. `swift run -c release pebsmoke` (or `pebble test`) — **456/456**, from the repo root (goldens are found relative to cwd).
+2. `swift run -c release pebsmoke` (or `pebble test`) — **601/601**, from the repo root (goldens are found relative to cwd). The portable suite is **566/566** and is what Windows CI runs.
 3. If goldens changed, your PR description must justify **every** changed value (see below).
 4. Keep diffs surgical. Match the style of the file you're in — this codebase has a consistent voice (compact, comment-where-it-matters), and drive-by reformatting makes review impossible.
 

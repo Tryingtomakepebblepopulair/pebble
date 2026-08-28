@@ -46,7 +46,7 @@ macOS is unchanged: same app, same saves, same green checks — 601 of them now.
 swift build                       # debug, all targets
 swift build -c release            # what CI builds
 swift run pebsmoke                # macOS: 601 checks (self-assigns a temp data root)
-swift run pebsmokecore            # portable: 525 checks, runs anywhere
+swift run pebsmokecore            # portable: 566 checks, runs anywhere
 ./pebble install                  # release build → ~/Applications/Pebble.app (~7 min)
 ./pebble serve --create "My SMP"  # headless server
 ```

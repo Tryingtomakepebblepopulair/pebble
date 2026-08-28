@@ -67,12 +67,33 @@ is implemented. `logo` and `title` have no Vulkan sibling on purpose: the
 Windows title screen draws its art through UI image quads instead.
 
 What is left is the kind of thing only real hardware tells you — none of this
-has run on a Windows machine yet. When it does, start with:
+has run on a Windows machine, or an Intel Mac, yet. When it does, start with:
 
 - the shadow map's orientation (the Y convention is subtle, see below),
 - the ultra pass, which is the newest and least exercised,
 - audio latency: waveOut with 512-frame buffers is about 43 ms, and if that
-  feels late, WASAPI is the upgrade path.
+  feels late, WASAPI is the upgrade path,
+- a Mac and a Windows player side by side on one seed, comparing screens.
+  Every difference found so far was found by reading, not by running; that
+  method has stopped yielding, and the next one will not.
+
+### How the differences were found
+
+Worth recording, because the same sweep is repeatable:
+
+1. Grep the Windows sources for symbols the Mac uses and Windows does not.
+   That is how the resource-pack gaps surfaced — a pack installs seven
+   things and Windows was taking one.
+2. Grep the Vulkan shaders and the Windows client for comments that admit a
+   divergence: "no fresnel", "for now", "later slice", "unlike the Mac".
+   Code tends to confess. That found the water fudge and two stale claims.
+3. Diff the two clients' per-frame call sequences against each other. That
+   found the camera: Windows derived the eye from the player directly and so
+   skipped view bobbing, third person and the front view, all of which live
+   in the shared `camState`.
+4. Check that a shared constant is actually *read* on both sides, not merely
+   defined. `PACK_TINT_GATE` existed in the portable mesher and was left nil
+   on Windows, which miscoloured 728 of 789 tiles.
 
 ## Conventions that bite
 
@@ -86,6 +107,17 @@ has run on a Windows machine yet. When it does, start with:
 - Per-frame streams are written before `pb_vk_frame` waits on the fence, so
   every setter calls `wait_frame_slot()` first.
 - Entity geometry slots: 0..223 mobs and remote players, 224..255 viewmodel.
+- Never compensate for a missing effect with a fudge factor. The Vulkan water
+  was thickened 40% to stand in for an absent highlight, which made it differ
+  from the Mac in the common case where the Mac has no highlight either. Port
+  the effect or leave the gap visible; a fudge hides the difference from the
+  next person to look.
+- Take the camera from `camState`, never from the player. It carries view
+  bobbing, the third-person pull-back with its block clipping, and the
+  front-view flip. Deriving an eye position by hand silently drops all three.
+- The Mac build must be universal. An arm64-only app does not run slowly on an
+  Intel Mac, it does not launch at all — Rosetta translates x86 to arm, not
+  the reverse. `pebble release` and the release workflow lipo both slices.
 - Entity part matrices (24 per draw) ride a dynamic uniform buffer; entities
   have their own descriptor-set layout because the shared one cannot grow a
   binding without breaking chunk/UI/sprite/cloud/celestial.

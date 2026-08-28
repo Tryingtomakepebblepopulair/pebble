@@ -1,29 +1,49 @@
 # Pebble — Architecture
 
-This is the technical tour. The one-paragraph version: **PebbleCore** is a headless, deterministic game engine (no AppKit imports anywhere); **Pebble** is a thin-ish macOS shell that owns the window, the Metal renderer, the synthesized audio engine, and the UI stack; **pebsmoke** is the regression harness that pins the engine to golden files. The app talks to the engine exclusively through the `GameHost` protocol, and the engine never draws, plays, or reads input directly.
+This is the technical tour. The one-paragraph version: **PebbleCoreBase** is a
+headless, deterministic game engine with nothing platform-specific in it;
+**Pebble** and **PebbleWin** are thin shells that own a window, a renderer and
+an audio sink on macOS and Windows respectively; **pebsmoke** is the
+regression harness that pins the engine to golden files. Both shells talk to
+the engine only through the `GameHost` protocol, and the engine never draws,
+plays, or reads input directly.
+
+The two shells are deliberately thin. Anything that decides *what* the player
+sees or hears — the entity animator, the particle simulation, the viewmodel
+placement, the sky colours, the audio synth, the UI stack, resource-pack
+loading — lives in the core and is called by both. What stays platform-side
+is only the API call that puts it on screen. That is why a Metal frame and a
+Vulkan frame show the same world rather than two interpretations of it.
 
 ```
-┌─────────────────────────── Pebble.app ───────────────────────────┐
-│  main.swift        NSWindow + MTKView, NSEvent → DOM key codes,  │
-│                    pointer capture, frame loop, HostBridge       │
-│  WorldRenderer     Metal pipelines, mesh arena, atlas, shadows,  │
-│                    sky/celestials/clouds, bloom, ultra, capture  │
-│  UICanvas/UIManager/Screens/Menus/HUD   canvas-2D-style batcher, │
-│                    screen stack, 16 gameplay screens, menus      │
-│  Audio             AVAudioSourceNode synth, recipes, reverb      │
-│  ResourcePacks (built-in Faithful loading)                       │
-└────────────────────────────┬─────────────────────────────────────┘
+┌──────── Pebble.app (macOS) ────────┐  ┌──── PebbleWin (Windows) ────┐
+│ main.swift   NSWindow + MTKView,   │  │ main.swift  Win32 window +  │
+│              NSEvent → DOM codes   │  │             message pump    │
+│ WorldRenderer  Metal pipelines,    │  │ CPebbleVulkan  Vulkan behind│
+│              mesh arena, atlas     │  │      a C ABI, embedded SPIR-V│
+│ Audio        AVAudioSourceNode     │  │ CPebbleAudio   winmm waveOut │
+└─────────────────┬──────────────────┘  └──────────────┬──────────────┘
+                  └───────────────┬───────────────────-┘
                    GameHost protocol (openScreen, playSound,
                    addParticles, mesh upload, chunk requests…)
 ┌────────────────────────────┴─────────────────────────────────────┐
-│                         PebbleCore                               │
+│                       PebbleCoreBase                             │
 │  GameCore (20Hz tick orchestrator)  ·  GameWorld  ·  LightEngine │
 │  Gen (terrain/biomes/features/structures)  ·  Entity (AI)        │
 │  Items (recipes/enchants/loot)  ·  Systems (redstone/interact/…) │
-│  Render (mesher + texture atlas — data only, no Metal)           │
-│  Saves (SQLite)  ·  Core (fdlibm, RNG, noise)                    │
+│  Render  mesher, atlas, entity animator, particles, viewmodel,   │
+│          gear rigs, sky colours, shadow matrix, pack loading     │
+│  Audio   the whole synth — voices, recipes, music, reverb        │
+│  UI      canvas batcher, screen stack, 16 screens, menus, HUD    │
+│  Net (protocol + socket transport)  ·  Saves  ·  Core (fdlibm)   │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+macOS additionally has `PebbleCore`, a small Apple-side layer for SQLite,
+Bonjour and simd matrices; Windows reaches the same seams through the
+portable equivalents (`Mat4f`, the plain-socket transport, `vcSupportDir()`).
+`PORTING/STATUS.md` tracks what each backend covers and how to verify the
+Windows side from a Mac.
 
 ## The determinism layer (Core/)
 
@@ -54,7 +74,11 @@ Climate sampling (six FBM samplers seeded from the world seed) feeds spline look
 
 Engine side (`Render/`): the **mesher** consumes a padded 18×18×18 snapshot and emits opaque/cutout/translucent vertex buffers — greedy quad merging for full cubes, per-vertex AO, smooth light, biome tint, and an animation channel (water/lava/portal/fire/sway). Vertex format is 28 bytes / 7 words. The **atlas substrate** generates all 757+ baseline tiles in code with integer-only color math (pinned byte-identical by `atlas-goldens.json`); the built-in Faithful art overlays it. Tiles that vanilla renders as block entities (beds, chests, the bell, the decorated pot) have no flat `block/` texture in the Java format — the loader composites them from the art's `entity/` unwraps, so every visible surface comes from the Faithful set (the only substrate tiles left at runtime are the three airs, a particle speck, and the end-portal effect, which vanilla also renders as a shader rather than a texture).
 
-App side (`WorldRenderer`): runtime-compiled MSL (no `.metal` files — SPM doesn't build them), a **mesh arena** of 32 MB shared `MTLBuffer` pages with a first-fit free list and 3-frame deferred frees so all section draws bind one buffer at different offsets. Pass order: shadow (PCF/Poisson, snapped texel grid) → sky gradient → stars → celestials (Faithful sun/moon drawn additively) → clouds → opaque → cutout (back-culled) → translucent → entities (pose animator, Faithful skins) → particles (instanced, triple-buffered) → ultra (half-res SSAO + shadow-marched volumetrics) → bloom → composite (ACES) → UI. The UI is a single draw call: `UICanvas` mimics Canvas2D (fillRect, gradients, transforms, text via a built-in 5×7 font or the Faithful font sheets) into one vertex stream with a texture-segmented batch.
+App side, macOS (`WorldRenderer`): runtime-compiled MSL (no `.metal` files — SPM doesn't build them), a **mesh arena** of 32 MB shared `MTLBuffer` pages with a first-fit free list and 3-frame deferred frees so all section draws bind one buffer at different offsets. Pass order: shadow (PCF/Poisson, snapped texel grid) → sky gradient → stars → celestials (Faithful sun/moon drawn additively) → clouds → opaque → cutout (back-culled) → translucent → entities (pose animator, Faithful skins) → particles (instanced, triple-buffered) → ultra (half-res SSAO + shadow-marched volumetrics) → bloom → composite (ACES) → UI. The UI is a single draw call: `UICanvas` mimics Canvas2D (fillRect, gradients, transforms, text via a built-in 5×7 font or the Faithful font sheets) into one vertex stream with a texture-segmented batch.
+
+App side, Windows (`CPebbleVulkan`): the same pass order behind a `pb_vk_*` C ABI — no Vulkan type ever crosses into Swift. `vulkan-1.dll` is loaded at runtime, so neither building nor running needs an SDK, and the SPIR-V is embedded in `shaders_spv.h` so a build never needs a shader compiler either. The differences that matter are all consequences of Vulkan's own rules: clip-space Y points down, so every vertex shader ends with `gl_Position.y = -gl_Position.y`; the terrain atlas is a 2D tile grid rather than a texture array, because per-GPU array-layer limits start as low as 256; and anything over 128 bytes cannot be a push constant, so the 24-matrix entity rig, the sun's matrix and the ultra block each ride a dynamic uniform buffer with one slot per frame in flight. Terrain and entities carry their own descriptor-set layouts for the same reason.
+
+The post chain is best-effort: if the offscreen colour and depth targets cannot be built, `g_postOK` stays 0 and the frame renders straight into the swapchain with no bloom or composite. A missing effect beats a black window.
 
 CPU/GPU synchronization leans on `CAMetalLayer`'s default 3-drawable back-pressure: the mesh arena defers frees 3 frames, and UI/particle instance buffers are 3-deep rings. Atlas animation updates are staged into buffers and blitted at frame start so in-flight frames never see a half-written texture.
 

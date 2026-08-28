@@ -1,6 +1,14 @@
 # Pebble Windows/macOS Porting Plan
 
-Status: planning baseline after parallel repository exploration and adversarial review. This is the universal plan for porting Pebble from a macOS AppKit/Metal game to a Windows + macOS codebase while keeping the existing macOS app usable throughout.
+Status: **executed.** All fourteen modules landed; Pebble ships on Windows and
+macOS from one codebase. What follows is the original plan, kept as the record
+of how the port was scoped and why each seam sits where it does — it is no
+longer a to-do list.
+
+**For where the port actually stands, and how to verify the Windows side from
+a Mac, read [STATUS.md](STATUS.md) instead.** That file is the living one.
+
+This was the universal plan for porting Pebble from a macOS AppKit/Metal game to a Windows + macOS codebase while keeping the existing macOS app usable throughout.
 
 ## Source facts
 
