@@ -3,6 +3,28 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.3.3 — 2026-08-28 — Pebble notices when it died
+
+The report that made this possible: it only crashes once someone is **in a
+world**. The title screen has no terrain in it; a world does. That is where
+everything expensive lives — the chunk buffers, the shadow map, the bloom
+chain — and it is why the machines with the least to spare were the ones
+falling over.
+
+- **Pebble now knows it crashed, and comes back gentler.** It leaves a note
+  while it runs and tears it up on the way out. Finding that note still there
+  at startup means the last run never reached its ending, whatever the reason
+  — a crash, a graphics driver reset, Task Manager. When that happens it turns
+  the heaviest settings down on its own: shadows off, bloom off, render
+  distance to 6. If it happens twice in a row it goes further, to 4 and simple
+  terrain, and then it stops — there is a floor, and a world you can see stays
+  the point.
+- **It tells you what it changed**, and where to change it back. Quietly
+  rewriting somebody's settings would be worse than the crash.
+- **The log now says what kind of graphics card it found** — integrated or
+  discrete, and how much memory it has. On a report that reads "it crashes on
+  my friend's PC and not mine", that one line is most of the answer.
+
 ## 1.3.2 — 2026-08-28 — for the slower computers
 
 Two things aimed squarely at the machines that were having the worst time.

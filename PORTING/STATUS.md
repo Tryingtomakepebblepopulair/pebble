@@ -12,8 +12,8 @@ x86_64-w64-mingw32-gcc -c -o /tmp/a.o -I Sources/CPebbleAudio/include Sources/CP
 # shaders + their push-constant block sizes (mirror these with _Static_assert)
 glslangValidator -V --target-env vulkan1.0 -q -o /dev/null Sources/CPebbleVulkan/shaders/sky.vert
 # the goldens
-swift run -c release pebsmoke        # macOS, 632
-swift run -c release pebsmokecore    # portable — what Windows CI runs, 597
+swift run -c release pebsmoke        # macOS, 641
+swift run -c release pebsmokecore    # portable — what Windows CI runs, 606
 ```
 
 `Sources/PebbleWin/*.swift` sits behind `#if os(Windows)` and never type-checks

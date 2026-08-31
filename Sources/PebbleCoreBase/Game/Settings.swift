@@ -144,3 +144,40 @@ public func saveKeybinds(_ binds: [String: String]) {
         try? data.write(to: keybindsURL, options: .atomic)
     }
 }
+
+/// Turn down whatever a weak machine is most likely to have died on, one step
+/// further for every launch in a row that ended badly. Returns what it
+/// changed, in words, and an empty list when there is nothing left worth
+/// turning off.
+///
+/// The point is the failures nobody can reproduce. A machine that dies once
+/// in a world with shadows, bloom and a full render distance will do it again
+/// on the next launch, and the player has no way of knowing which setting is
+/// drowning their GPU. Pebble turns them down itself and says which ones —
+/// changing someone's settings silently would be worse than the crash.
+public func easeSettingsAfterCrash(_ settings: inout Settings, roughStarts: Int) -> [String] {
+    var changed: [String] = []
+    if settings.shadows {
+        settings.shadows = false
+        changed.append("shadows off")
+    }
+    if settings.bloom {
+        settings.bloom = false
+        changed.append("bloom off")
+    }
+    if settings.shader != nil {
+        settings.shader = nil
+        changed.append("shader off")
+    }
+    // 4 is the floor loadSettings enforces; stopping there keeps the world visible
+    let cap = roughStarts >= 2 ? 4 : 6
+    if settings.renderDistance > cap {
+        settings.renderDistance = cap
+        changed.append("render distance \(cap)")
+    }
+    if roughStarts >= 2 && !settings.simpleMesh {
+        settings.simpleMesh = true
+        changed.append("simple terrain")
+    }
+    return changed
+}

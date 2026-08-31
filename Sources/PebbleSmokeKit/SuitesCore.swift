@@ -1123,3 +1123,45 @@ public func smokeFdlibmSuite() {
         check("fmath-goldens.json loadable", false, "not found")
     }
 }
+
+/// Coming back gentler after a launch that ended badly. The escalation has to
+/// be monotonic and it has to stop: a player whose machine dies for some
+/// unrelated reason must not be walked down to an unplayable world.
+public func smokeCrashEasingSuite() {
+    section("settings eased after a bad exit")
+
+    var s = Settings()          // the shipping defaults
+    check("defaults are the expensive ones", s.shadows && s.bloom && s.renderDistance == 8)
+
+    let first = easeSettingsAfterCrash(&s, roughStarts: 1)
+    check("one bad exit turns the heavy things off",
+          !s.shadows && !s.bloom && s.renderDistance == 6, "\(first)")
+    check("it says what it changed", first.count == 3, "\(first)")
+    check("simple terrain is not reached yet", !s.simpleMesh)
+
+    let second = easeSettingsAfterCrash(&s, roughStarts: 2)
+    check("a second bad exit goes further",
+          s.renderDistance == 4 && s.simpleMesh, "\(second)")
+
+    let third = easeSettingsAfterCrash(&s, roughStarts: 3)
+    check("and then it stops", third.isEmpty, "\(third)")
+    check("it never goes below the playable floor", s.renderDistance >= 4)
+
+    // it must not touch anything the player set that has no bearing on this
+    var keep = Settings()
+    keep.playerName = "Xavi"
+    keep.sensitivity = 0.9
+    keep.fov = 90
+    _ = easeSettingsAfterCrash(&keep, roughStarts: 2)
+    check("it leaves unrelated settings alone",
+          keep.playerName == "Xavi" && keep.sensitivity == 0.9 && keep.fov == 90)
+
+    // a player who already runs lean loses nothing and is told nothing
+    var lean = Settings()
+    lean.shadows = false
+    lean.bloom = false
+    lean.renderDistance = 4
+    lean.simpleMesh = true
+    check("nothing to ease is reported as nothing",
+          easeSettingsAfterCrash(&lean, roughStarts: 1).isEmpty)
+}

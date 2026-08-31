@@ -14,7 +14,7 @@ That sentence is not marketing; it is the reason every feature since 1.1.0 exist
 
 **2. You can play together.** Same WiFi: zero setup, the world just appears in the list. Across the internet: a real server (`pebble serve`) that stays up without a host player, joined by address. Across platforms: a Mac and a Windows PC in the same world, because the simulation is identical on both.
 
-**3. It stays honest.** 632 frozen golden checks pin worldgen, physics and protocol bit-for-bit. The Mac app never breaks so that something else can move forward. And when something cannot be done — or cannot be verified, like a Windows build nobody has yet run on a Windows machine — the answer is "here is why, here is what was checked instead, and here is what is still unknown", never a stub that pretends.
+**3. It stays honest.** 641 frozen golden checks pin worldgen, physics and protocol bit-for-bit. The Mac app never breaks so that something else can move forward. And when something cannot be done — or cannot be verified, like a Windows build nobody has yet run on a Windows machine — the answer is "here is why, here is what was checked instead, and here is what is still unknown", never a stub that pretends.
 
 ## Decisions already made
 

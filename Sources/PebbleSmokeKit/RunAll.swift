@@ -5,6 +5,7 @@ public func runPortableSmokeSuites() {
     smokeRandomSuite()
     smokeNoiseSuite()
     smokeMathSuite()
+    smokeCrashEasingSuite()
     smokeBlockRegistrySuite()
     smokeItemRegistrySuite()
     smokeBiomeSuite()

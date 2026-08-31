@@ -1032,9 +1032,27 @@ int pb_vk_create(void* hwnd, void* hinstance, int width, int height) {
                     g_queueFamily = q;
                     VkPhysicalDeviceProperties props;
                     vkGetPhysicalDeviceProperties(g_phys, &props);
+                    // What kind of machine this is, in the one line every
+                    // bug report already carries. "integrated, 512 MB" is the
+                    // difference between a puzzle and an obvious answer.
+                    VkPhysicalDeviceMemoryProperties mp;
+                    vkGetPhysicalDeviceMemoryProperties(g_phys, &mp);
+                    unsigned long long vram = 0;
+                    for (uint32_t hi = 0; hi < mp.memoryHeapCount; hi++) {
+                        if (mp.memoryHeaps[hi].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+                            vram += mp.memoryHeaps[hi].size;
+                    }
+                    const char* kind = "other";
+                    switch (props.deviceType) {
+                        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: kind = "integrated"; break;
+                        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   kind = "discrete"; break;
+                        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    kind = "virtual"; break;
+                        case VK_PHYSICAL_DEVICE_TYPE_CPU:            kind = "software"; break;
+                        default: break;
+                    }
                     snprintf(g_gpu, sizeof g_gpu,
-                             "%s (maxTex %u, maxLayers %u, push %u, maxAllocs %u)",
-                             props.deviceName,
+                             "%s (%s, %llu MB, maxTex %u, maxLayers %u, push %u, maxAllocs %u)",
+                             props.deviceName, kind, vram / (1024ull * 1024ull),
                              props.limits.maxImageDimension2D,
                              props.limits.maxImageArrayLayers,
                              props.limits.maxPushConstantsSize,

@@ -58,6 +58,7 @@ if !claimDataRoot(dataRoot.path) {
 }
 
 openLog(dataRoot: dataRoot.path)
+let roughStarts = markRunStarted(dataRoot: dataRoot.path)
 
 plog("Pebble \(PEBBLE_VERSION) — Windows client (Vulkan)")
 plog("exe folder: \(exeDir())")
@@ -288,6 +289,32 @@ plog("vulkan ready — GPU: \(String(cString: pb_vk_device_name()))")
 // ---- the game + the real UI stack -------------------------------------------------
 let game = GameCore()
 gGame = game
+// The previous run did not reach its own ending. Whatever killed it, the
+// cheapest thing that helps is to stop asking the machine for the expensive
+// parts — and to say so, rather than silently changing what the player set.
+if roughStarts > 0 {
+    plog("last run ended badly (\(roughStarts) in a row)")
+    var eased = game.settings
+    let changed = easeSettingsAfterCrash(&eased, roughStarts: roughStarts)
+    if !changed.isEmpty {
+        game.settings = eased
+        game.applySettings()
+        saveSettings(eased)
+        plog("eased settings: \(changed.joined(separator: ", "))")
+        notice("""
+            Pebble didn't close properly last time, so it has turned the \
+            heaviest graphics settings down:
+
+            \(changed.joined(separator: "\n"))
+
+            You can put them back under Options > Video whenever you like. If \
+            it keeps happening, leave them off and send pebble-log-prev.txt \
+            along with the report.
+            """)
+    } else {
+        plog("nothing left to ease — settings are already at their gentlest")
+    }
+}
 if let why = game.db.openError {
     plog("SAVES UNAVAILABLE: \(why)")
     notice("""
@@ -333,6 +360,7 @@ if let n = cliName { game.settings.playerName = n }
 // platform seams for the portable screens (PORTING module 09)
 platformQuit = {
     game.exitToTitle()       // saves when a world is open
+    markCleanExit()
     plog("clean exit (quit)")
     exit(0)
 }
@@ -730,6 +758,7 @@ mainLoop: while true {
 
 plog("closing — saving…")
 game.exitToTitle()
+markCleanExit()
 audioOut.stop()
 pb_vk_destroy()
 plog("clean exit")

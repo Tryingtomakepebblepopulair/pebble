@@ -170,6 +170,40 @@ func notice(_ text: String) {
     }
 }
 
+// ---- coming back gentler after a bad exit ----------------------------------------
+
+private var runMarkerPath = ""
+
+/// A file written while Pebble is running and deleted when it closes properly.
+/// Finding one at startup means the last run did not get to the end — a crash,
+/// a driver reset, a kill from Task Manager, a pulled plug.
+///
+/// This exists because the interesting failures are the ones nobody can
+/// reproduce. A machine that dies once in a world with shadows, bloom and a
+/// full render distance will do it again on the next launch, and again, with
+/// the player having no idea which setting is the one drowning their GPU.
+/// Pebble now notices, turns the expensive things off itself, and says so.
+///
+/// Returns how many launches in a row have ended badly.
+func markRunStarted(dataRoot: String) -> Int {
+    runMarkerPath = dataRoot + "\\last-run.txt"
+    var count = 0
+    if let text = try? String(contentsOfFile: runMarkerPath, encoding: .utf8),
+       let n = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+        count = max(0, n)
+    } else if FileManager.default.fileExists(atPath: runMarkerPath) {
+        count = 1
+    }
+    try? String(count + 1).write(toFile: runMarkerPath, atomically: true, encoding: .utf8)
+    return count
+}
+
+/// reached the end of the main loop, or Quit Game: the run counts as clean
+func markCleanExit() {
+    guard !runMarkerPath.isEmpty else { return }
+    try? FileManager.default.removeItem(atPath: runMarkerPath)
+}
+
 // ---- crashes -------------------------------------------------------------------
 
 /// what Windows means by the code in the crash log, in words

@@ -18,6 +18,7 @@ installAppleNetTransport()   // the LAN/dedicated e2e exercises the Apple adapte
 smokeRandomSuite()
 smokeNoiseSuite()
 smokeMathSuite()
+smokeCrashEasingSuite()
 
 // Apple simd camera math — Mat4/Frustum live in PebbleCore, not the
 // portable core, so these three checks can't join smokeMathSuite
