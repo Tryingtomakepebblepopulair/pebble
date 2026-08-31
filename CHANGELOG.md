@@ -3,6 +3,40 @@
 All notable changes to Pebble. Versions follow `MAJOR.MINOR.PATCH`; the
 in-app version string comes from `PEBBLE_VERSION` (PebbleCore/Game/Saves.swift).
 
+## 1.3.2 — 2026-08-28 — for the slower computers
+
+Two things aimed squarely at the machines that were having the worst time.
+
+### The crash on weaker PCs
+
+- **Pebble stopped stalling the whole graphics card every time a chunk went
+  out of view.** Freeing a piece of terrain waited for the GPU to go
+  completely idle first — once per piece, and walking in a straight line
+  retires dozens of them a second. On a fast card that is only wasteful. On a
+  slower one it adds up past two seconds, and Windows then resets the graphics
+  driver underneath the game, which arrives as Pebble crashing for no visible
+  reason. Nothing needed waiting on: retired pieces are now released a couple
+  of frames later, during a wait that was happening anyway.
+- **Terrain uses half as many graphics-memory allocations.** Drivers cap how
+  many may exist at once — commonly 4096 — and Pebble was spending two per
+  piece of terrain, so on a normal render distance it could simply run out and
+  leave holes in the world. One allocation now holds both of a piece's
+  buffers, which doubles how much world fits under the same ceiling.
+
+### Joining without the permission prompt
+
+- **Your friends no longer need Windows to have asked them anything.**
+  Discovery worked by the host shouting onto the network and everyone else
+  listening — but unrequested inbound packets are dropped by a firewall that
+  was never asked about Pebble, and on a standard (non-administrator) Windows
+  account that question is never asked at all. No prompt, no packets, an empty
+  list, and nothing anywhere to explain it.
+- Whoever is looking now **asks**, and hosts answer them directly. A reply to
+  a question you asked is traffic your firewall already expects, so it comes
+  back with no prompt and no permission needed. The person hosting still needs
+  to be reachable — that is unavoidable, someone has to accept connections —
+  but only one of you does.
+
 ## 1.3.1 — 2026-08-28 — heads, and a Pebble that starts
 
 - **Your skin's head is back.** Most skins keep their hair and face in the

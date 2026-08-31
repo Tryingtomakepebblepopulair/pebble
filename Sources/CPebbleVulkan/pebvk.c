@@ -2417,14 +2417,131 @@ static PbSection* find_section(uint64_t id, int pass) {
     return NULL;
 }
 
+// ---- deferred deletion ------------------------------------------------------
+//
+// Freeing a section used to stall the ENTIRE GPU: vkDeviceWaitIdle, once per
+// section, and walking in a straight line unloads dozens of them a frame. On
+// a fast card that is merely wasteful. On a weak one each stall costs
+// milliseconds, the frame runs past two seconds, and Windows' watchdog resets
+// the GPU underneath the process — which reaches the player as Pebble
+// crashing for no reason on the cheaper machine.
+//
+// Nothing needs to be waited on. A buffer that was in a command buffer is
+// safe to destroy once that frame's fence has been signalled, so handles go
+// on a queue tagged with the frame they were retired in and are destroyed
+// FRAMES_IN_FLIGHT frames later, from inside pb_vk_frame, after the wait that
+// was going to happen anyway.
+#define MAX_TRASH 8192
+typedef struct {
+    VkBuffer buf;
+    VkDeviceMemory mem;
+    uint32_t frame;
+} PbTrash;
+static PbTrash g_trash[MAX_TRASH];
+static int g_trashCount;
+
+static void trash_push(VkBuffer buf, VkDeviceMemory mem) {
+    if (!buf && !mem) return;
+    if (g_trashCount >= MAX_TRASH) {
+        // the queue is bounded; the old behaviour is the honest fallback
+        vkDeviceWaitIdle(g_device);
+        if (buf) vkDestroyBuffer(g_device, buf, NULL);
+        if (mem) vkFreeMemory(g_device, mem, NULL);
+        return;
+    }
+    g_trash[g_trashCount].buf = buf;
+    g_trash[g_trashCount].mem = mem;
+    g_trash[g_trashCount].frame = g_frame;
+    g_trashCount++;
+}
+
+/// called with this frame's fence already waited on
+static void trash_collect(void) {
+    int keep = 0;
+    for (int i = 0; i < g_trashCount; i++) {
+        if (g_frame - g_trash[i].frame > FRAMES_IN_FLIGHT) {
+            if (g_trash[i].buf) vkDestroyBuffer(g_device, g_trash[i].buf, NULL);
+            if (g_trash[i].mem) vkFreeMemory(g_device, g_trash[i].mem, NULL);
+        } else {
+            g_trash[keep++] = g_trash[i];
+        }
+    }
+    g_trashCount = keep;
+}
+
+/// destroy everything pending, whatever frame it came from (shutdown only)
+static void trash_drain(void) {
+    for (int i = 0; i < g_trashCount; i++) {
+        if (g_trash[i].buf) vkDestroyBuffer(g_device, g_trash[i].buf, NULL);
+        if (g_trash[i].mem) vkFreeMemory(g_device, g_trash[i].mem, NULL);
+    }
+    g_trashCount = 0;
+}
+
 static void free_section(PbSection* s) {
-    vkDeviceWaitIdle(g_device);   // uploads are load-time bursts; safe > fast
-    if (s->vbuf) vkDestroyBuffer(g_device, s->vbuf, NULL);
-    if (s->vmem) vkFreeMemory(g_device, s->vmem, NULL);
-    if (s->ibuf) vkDestroyBuffer(g_device, s->ibuf, NULL);
-    if (s->imem) vkFreeMemory(g_device, s->imem, NULL);
+    trash_push(s->vbuf, s->vmem);
+    trash_push(s->ibuf, s->imem);
     memset(s, 0, sizeof *s);
     s->pass = -1;
+}
+
+/// A section's vertex and index buffers out of ONE device allocation.
+///
+/// Drivers cap how many allocations may be live at once —
+/// maxMemoryAllocationCount, and 4096 is the usual figure on Windows. Two
+/// allocations per section against that ceiling means terrain starts failing
+/// to upload part-way through a normal render distance, on exactly the
+/// machines that can least afford it. One allocation, two buffers bound at
+/// offsets inside it, doubles how much world fits under the same ceiling.
+static int make_section_buffers(VkDeviceSize vbytes, const void* vdata,
+                                VkDeviceSize ibytes, const void* idata,
+                                VkBuffer* vbuf, VkBuffer* ibuf, VkDeviceMemory* mem) {
+    *vbuf = VK_NULL_HANDLE;
+    *ibuf = VK_NULL_HANDLE;
+    *mem = VK_NULL_HANDLE;
+#define SB_BAIL(what) do { \
+        snprintf(g_err, sizeof g_err, "%s", what); \
+        if (*mem) vkFreeMemory(g_device, *mem, NULL); \
+        if (*ibuf) vkDestroyBuffer(g_device, *ibuf, NULL); \
+        if (*vbuf) vkDestroyBuffer(g_device, *vbuf, NULL); \
+        *vbuf = VK_NULL_HANDLE; *ibuf = VK_NULL_HANDLE; *mem = VK_NULL_HANDLE; \
+        return -1; \
+    } while (0)
+    VkBufferCreateInfo bci = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    bci.size = vbytes;
+    bci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    if (vkCreateBuffer(g_device, &bci, NULL, vbuf) != VK_SUCCESS) SB_BAIL("create vertex buffer");
+    bci.size = ibytes;
+    bci.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    if (vkCreateBuffer(g_device, &bci, NULL, ibuf) != VK_SUCCESS) SB_BAIL("create index buffer");
+
+    VkMemoryRequirements vreq, ireq;
+    vkGetBufferMemoryRequirements(g_device, *vbuf, &vreq);
+    vkGetBufferMemoryRequirements(g_device, *ibuf, &ireq);
+    // the index buffer starts at the first offset that satisfies ITS alignment
+    VkDeviceSize ioff = ((vreq.size + ireq.alignment - 1) / ireq.alignment) * ireq.alignment;
+    VkMemoryAllocateInfo mai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    mai.allocationSize = ioff + ireq.size;
+    mai.memoryTypeIndex = find_mem_type(vreq.memoryTypeBits & ireq.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (mai.memoryTypeIndex == UINT32_MAX) SB_BAIL("no host-visible memory type for a section");
+    VkResult ar = vkAllocateMemory(g_device, &mai, NULL, mem);
+    if (ar != VK_SUCCESS) {
+        SB_BAIL(ar == VK_ERROR_TOO_MANY_OBJECTS
+                ? "out of GPU memory allocations (driver limit reached)"
+                : "allocate section memory");
+    }
+    if (vkBindBufferMemory(g_device, *vbuf, *mem, 0) != VK_SUCCESS) SB_BAIL("bind vertex buffer");
+    if (vkBindBufferMemory(g_device, *ibuf, *mem, ioff) != VK_SUCCESS) SB_BAIL("bind index buffer");
+    void* dst = NULL;
+    if (vkMapMemory(g_device, *mem, 0, mai.allocationSize, 0, &dst) != VK_SUCCESS)
+        SB_BAIL("map section memory");
+    memcpy(dst, vdata, (size_t)vbytes);
+    memcpy((char*)dst + ioff, idata, (size_t)ibytes);
+    vkUnmapMemory(g_device, *mem);
+#undef SB_BAIL
+    return 0;
 }
 
 int pb_vk_upload_section(unsigned long long id, int pass,
@@ -2439,14 +2556,17 @@ int pb_vk_upload_section(unsigned long long id, int pass,
         if (g_sections[i].pass == -1) { s = &g_sections[i]; break; }
     }
     if (!s) FAIL("out of section slots (%d)", MAX_SECTIONS);
-    // A slot is only claimed once BOTH buffers exist. Bailing out halfway used
-    // to leave the vertex buffer in a slot still marked free, so the next
-    // upload overwrote the handle and leaked it — one leak per failure, for
-    // as long as the player kept walking.
-    if (make_buffer((VkDeviceSize)vertCount * 28, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                    &s->vbuf, &s->vmem, verts) != 0) { free_section(s); return -1; }
-    if (make_buffer((VkDeviceSize)indexCount * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                    &s->ibuf, &s->imem, indices) != 0) { free_section(s); return -1; }
+    // One allocation holds both buffers, and either everything below succeeds
+    // or the slot is left exactly as it was found. Claiming it half-built used
+    // to leak the vertex buffer on every failure, for as long as the player
+    // kept walking — under the very memory pressure that caused the failure.
+    // `imem` stays null: the single allocation lives in `vmem`.
+    if (make_section_buffers((VkDeviceSize)vertCount * 28, verts,
+                             (VkDeviceSize)indexCount * 4, indices,
+                             &s->vbuf, &s->ibuf, &s->vmem) != 0) {
+        free_section(s);
+        return -1;
+    }
     s->id = id;
     s->pass = pass;
     s->ox = ox; s->oy = oy; s->oz = oz;
@@ -3457,6 +3577,7 @@ int pb_vk_frame(float r, float g, float b) {
 
     uint32_t f = g_frame % FRAMES_IN_FLIGHT;
     vkWaitForFences(g_device, 1, &g_fence[f], VK_TRUE, UINT64_MAX);
+    trash_collect();   // this slot's work is done; its retired buffers can go
 
     uint32_t idx = 0;
     VkResult ar = vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX,
@@ -3553,6 +3674,7 @@ int pb_vk_frame(float r, float g, float b) {
 void pb_vk_destroy(void) {
     if (g_device) {
         vkDeviceWaitIdle(g_device);
+        trash_drain();
         for (int i = 0; i < MAX_SECTIONS; i++) {
             if (g_sections[i].pass != -1) {
                 PbSection* s = &g_sections[i];

@@ -226,6 +226,15 @@ public func smokeLanBeaconSuite() {
           && decodeLanBeacon(Data("PEB1\nport=0\n".utf8)) == nil          // port zero
           && decodeLanBeacon(Data(repeating: 0xFF, count: 2048)) == nil)
 
+    // the query a guest sends. It exists so the answer is SOLICITED traffic:
+    // a firewall that never prompted the player still lets a reply back in
+    check("a query is recognisable", isLanQuery(encodeLanQuery()))
+    check("a query is not mistaken for a game", decodeLanBeacon(encodeLanQuery()) == nil)
+    check("a game is not mistaken for a query", !isLanQuery(packet))
+    check("a query rejects what isn't one",
+          !isLanQuery(Data()) && !isLanQuery(Data("hello".utf8))
+          && !isLanQuery(Data(repeating: 0x51, count: 4096)))
+
     // and the live path: a host beacons, a listener hears it, over loopback
     let savedFactory = makeNetListener
     makeNetListener = { SocketListener() }
